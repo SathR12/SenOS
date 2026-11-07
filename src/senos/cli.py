@@ -1,4 +1,4 @@
-"""CLI entry point. Registration works; status and restore remain placeholders.
+"""CLI entry point. Registry status and explicit demo data; restore is pending.
 
 Keep this module limited to argument parsing and output so a future UI can
 reuse the same application services.
@@ -12,6 +12,7 @@ from pathlib import Path
 import typer
 
 from senos.config import default_registry_path
+from senos.telemetry.status import StatusError, get_status
 from senos.workloads.registry import Registry, RegistrationError
 
 app = typer.Typer(
@@ -37,9 +38,40 @@ def show_version() -> None:
 
 
 @app.command()
-def status() -> None:
-    """Show registered workloads and current resource observations."""
-    _not_implemented("status")
+def status(
+    demo: bool = typer.Option(False, "--demo", help="Show labeled synthetic samples instead of registered workloads."),
+    db: Path | None = typer.Option(None, "--db", envvar="SENOS_REGISTRY_PATH", help="Override the per-user registry database path."),
+    json_output: bool = typer.Option(False, "--json", help="Print a machine-readable status snapshot."),
+) -> None:
+    """List saved workloads; metrics are unavailable until real telemetry exists."""
+    try:
+        snapshot = get_status(db if db is not None else default_registry_path(), demo=demo)
+    except StatusError as error:
+        typer.echo(f"senos status: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    if json_output:
+        typer.echo(json.dumps({
+            "source": snapshot.source,
+            "live_telemetry": False,
+            "workloads": [
+                {"workload": row.workload.model_dump(mode="json"), "observation": row.observation.model_dump(mode="json")}
+                for row in snapshot.rows
+            ],
+        }))
+        return
+    if demo:
+        typer.echo("DEMO: synthetic workloads and readings; not your registered applications.")
+    else:
+        typer.echo("Saved registrations only. Live telemetry is not implemented; unavailable readings are shown as N/A.")
+    if not snapshot.rows:
+        typer.echo("No workloads registered." if not demo else "No demo workloads available.")
+        return
+    typer.echo(f"{'NAME':<16} {'UNIT':<28} {'MANAGER':<8} {'STATE':<9} {'CPU %':>6} {'MEM MiB':>9}")
+    for row in snapshot.rows:
+        workload, observation = row.workload, row.observation
+        cpu = "N/A" if observation.cpu_usage_percent is None else f"{observation.cpu_usage_percent:.1f}"
+        memory = "N/A" if observation.memory_usage_bytes is None else f"{observation.memory_usage_bytes / 1024**2:.0f}"
+        typer.echo(f"{workload.name:<16} {workload.unit:<28} {workload.manager:<8} {observation.state.value:<9} {cpu:>6} {memory:>9}")
 
 
 @app.command()

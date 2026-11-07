@@ -31,9 +31,16 @@ def test_register_real_user_service_across_cli_processes(tmp_path):
         assert initial["workload"]["unit"] == unit
         assert repeated["created"] is False
         assert repeated["workload"] == initial["workload"]
+        status_command = [sys.executable, "-c", "from senos.cli import app; app()", "status", "--db", str(database), "--json"]
+        status = json.loads(subprocess.run(status_command, check=True, capture_output=True, text=True, timeout=10).stdout)
+        assert status["source"] == "registry"
+        assert status["workloads"][0]["workload"]["workload_id"] == initial["workload"]["id"]
+        assert status["workloads"][0]["observation"]["cpu_usage_percent"] is None
         remove_command = [sys.executable, "-c", "from senos.cli import app; app()", "unregister", "test-workload", "--db", str(database), "--json"]
         removed = subprocess.run(remove_command, check=True, capture_output=True, text=True, timeout=10)
         assert json.loads(removed.stdout) == {"removed": 1}
+        empty = subprocess.run(status_command, check=True, capture_output=True, text=True, timeout=10)
+        assert json.loads(empty.stdout)["workloads"] == []
         # Removal affects the registry only, not the running application.
         subprocess.run(["systemctl", "--user", "is-active", "--quiet", "--", unit], check=True, timeout=10)
     finally:

@@ -76,7 +76,9 @@ class RegistryStore:
         if not self.path.exists():
             return []
         try:
-            with closing(self._connect()) as connection:
+            uri = self.path.resolve().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(uri, uri=True, timeout=5)) as connection:
+                connection.row_factory = sqlite3.Row
                 rows = connection.execute("SELECT * FROM registered_workloads ORDER BY name").fetchall()
                 return [RegisteredWorkload(**dict(row)) for row in rows]
         except (OSError, sqlite3.Error) as error:
