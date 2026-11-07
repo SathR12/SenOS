@@ -22,5 +22,5 @@ class ContractModel(BaseModel):
     )
 
 
-CpuWeight = Annotated[int, Field(ge=1, le=10_000)]
+CpuWeight = Annotated[int, Field(strict=True, ge=1, le=10_000)]
 Percent = Annotated[float, Field(ge=0, le=100)]

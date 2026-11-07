@@ -22,7 +22,7 @@ class Intent(ContractModel):
     kind: IntentKind
     target_workload_id: UUID
     preserve_workload_ids: tuple[UUID, ...] = ()
-    duration_seconds: int | None = Field(default=None, ge=1, le=86_400)
+    duration_seconds: int | None = Field(default=None, strict=True, ge=1, le=86_400)
     source_text: str = Field(min_length=1, max_length=1_000)
     submitted_at: AwareDatetime = Field(default_factory=utc_now)
 

@@ -4,9 +4,9 @@ Reviewed commit `c450b98036fa87e194d7f1a8251f4b09f3e28607` from Alex's `feat/sha
 
 ## Verification
 
-The combined branch passes 73 tests in WSL, including the opt-in systemd registration/unregistration test. The merge has no textual conflicts. Registration still uses its internal persistence record; passing tests do not demonstrate that registration and telemetry exchange the new contracts yet.
+The initial combined branch passed 73 tests in WSL, including the opt-in systemd registration/unregistration test. The merge has no textual conflicts. Registration still uses its internal persistence record; passing tests do not demonstrate that registration and telemetry exchange the new contracts yet.
 
-## Findings to resolve before contract integration
+## Original findings (resolved on the integration branch)
 
 ### P2: Boolean policy values are silently coerced to integers
 
@@ -28,4 +28,10 @@ Recommendation: allow unknown/unavailable measurements explicitly (for example, 
 
 ## Disposition
 
-Alex's implementation is merged locally for continued development without silently changing his contract design. The findings above remain open; this is not a recommendation to merge PR #18 into main unchanged. Agree on contract semantics with Alex before wiring registry/status/telemetry to them. The existing CLI functionality continues to work independently.
+After the original review, the user authorized fixing and publishing the combined feature branch. The follow-up changes on `feat/workload-registration` resolve all three findings:
+
+- Strict integer fields reject booleans, strings, and floats for weights, durations, and bytes.
+- Shared validation supports service/scope targets, 128-character printable names, explicit manager context, and rejection of bare templates. The persistence adapter preserves saved identity and registration time.
+- Observation supports unavailable CPU/memory readings as None, with cgroup memory/PSI semantics documented.
+
+The combined suite passes 103 tests in WSL, including the real systemd registration/unregistration test and 30 new contract/registry regression cases. Alex's source branch and PR are unchanged; these fixes live on the combined feature branch. Main has not been changed. Teammate review is still required before a PR into main is merged.

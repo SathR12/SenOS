@@ -9,21 +9,36 @@ UUIDs, and all byte values use bytes rather than platform-dependent units.
 
 `Workload` is the allowlist record for an application the user permits SenOS to
 observe and manage. It contains a stable ID, a user-facing name, a validated
-systemd `.service` unit name, and the registration time. Possessing a process ID
-or filesystem path is not enough to create a managed workload.
+systemd `.service` or `.scope` unit name, the `user`/`system` manager, and the registration time. Possessing a process ID
+or filesystem path is not enough to create a managed workload. Display names use
+1 through 128 printable characters. Simple units and instantiated templates are
+supported; paths, shell syntax, wildcard patterns, escaped names, and bare
+uninstantiated templates are rejected. Syntax validation does not authorize an
+operation or prove a unit exists.
+
+The registry and contract use the same name/unit validators.
+`RegisteredWorkload.to_workload()` preserves the stored UUID, timestamp, and
+manager rather than generating a new workload identity. The registry's CLI JSON
+continues to use `id`; the shared contract uses `workload_id`. The adapter is the
+explicit boundary between those representations. User-manager identity is local
+to the OS account owning the registry; do not share a registry across accounts.
 
 ## Observation
 
 `Observation` is a point-in-time health snapshot for one workload. It records
 the systemd lifecycle state, CPU use, memory use, and optional ten-second CPU
 and memory PSI averages. CPU use may exceed 100 percent because one workload
-can use more than one logical CPU. PSI percentages remain bounded from 0 to 100.
+can use more than one logical CPU. CPU and memory measurements default to
+`None` when unavailable (including initial rate samples); zero means measured
+zero. Memory usage is cgroup `memory.current` in bytes, not summed process RSS.
+PSI fields describe the workload cgroup's ten-second pressure averages, not
+system-wide pressure. PSI percentages remain bounded from 0 to 100.
 
 ## Intent
 
 `Intent` is a validated statement of what the user wants. The first milestone
 supports `prioritize` and `restore`. A prioritize intent identifies one target,
-the workloads that must continue making progress, and a bounded duration. A
+the workloads that must continue making progress, and a bounded duration of 1 through 86,400 seconds (an initial SenOS policy choice). A
 restore intent has no duration. `source_text` preserves the original request for
 audit and explanation.
 
@@ -44,3 +59,15 @@ verified effective value. A rejected result may record the value it observed,
 but it cannot claim an effective changed value. Failed results may include values
 when the executor learned them, allowing
 recovery code to represent partial or uncertain failures without inventing data.
+
+## Numeric inputs and compatibility
+
+CPU weights, durations, and byte counts require actual integers. Booleans,
+numeric strings, and floats are rejected rather than coerced. UUIDs, timestamps,
+and enum values retain their normal JSON parsing behavior.
+
+Existing stored registry records need no migration: the adapter maps existing
+columns to the shared contract. `manager` defaults to `user` for older standalone
+Workload payloads; records from the registry always supply their explicit
+manager. Consumers of Observation must handle `None` instead of assuming every
+sample contains numeric metrics.

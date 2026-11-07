@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Protocol
 
+from senos.contracts.workload import validate_workload_name
 from senos.storage.registry import RegisteredWorkload, RegistryStore
 from .errors import RegistrationError
 from .systemd import SystemdResolver, UnitInfo, validate_unit
@@ -13,10 +14,10 @@ class UnitResolver(Protocol):
 
 
 def _validated_name(name: str) -> str:
-    name = name.strip()
-    if not name or len(name) > 128 or any(not character.isprintable() for character in name):
-        raise RegistrationError("Workload name must contain 1 to 128 printable characters")
-    return name
+    try:
+        return validate_workload_name(name)
+    except ValueError as error:
+        raise RegistrationError(str(error)) from error
 
 
 class Registry:

@@ -14,7 +14,7 @@ SenOS runs in Linux user space and uses existing operating-system controls. It d
 
 ## Project status
 
-This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, and removal through `unregister`. The `status` and `restore` commands are placeholders. Agent behavior, telemetry, and resource control are not implemented.
+This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, and removal through `unregister`. The `status` and `restore` commands are placeholders. The shared contracts and registry adapter are implemented; see [contract semantics](docs/contracts.md). Agent behavior, telemetry, and resource control are not implemented.
 
 **We are building the CLI first.** A UI can follow once the controller, safety checks, and experiments work. Both interfaces should use the same application services and validated data contracts.
 
@@ -192,6 +192,12 @@ Agree on shared contracts and their example payloads before implementing modules
 6. Add one bounded CPU-weight operation, then verify restoration, rejected actions, and crash recovery.
 
 To set up a development environment, install [uv](https://docs.astral.sh/uv/) and run `uv sync`. Run the tests with `uv run pytest` and the CLI with `uv run senos --help`. `senos version`, `senos register NAME --unit UNIT`, `senos unregister NAME`, and `senos unregister --all` work. See [workload registration](docs/registration.md) for a WSL/Linux example, persistence, validation, and integration testing. `status` and `restore` still exit with "not implemented yet".
+
+## Collaboration
+
+Follow [AGENTS.md](AGENTS.md) for coding-agent contributions. Start focused task branches from current `main`, using `feat/`, `fix/`, `docs/`, `test/`, `chore/`, or `refactor/` plus a lowercase, hyphen-separated task name. Keep CLI presentation separate from services and coordinate shared-contract changes with their owner.
+
+Publish changes through a pull request into `main`, explain the behavior and validation, request at least one teammate review, then squash-merge and delete the task branch. Do not push directly to `main` or force-push shared branches. A maintainer must configure GitHub branch protection separately; this documentation does not enforce it.
 
 ## Evaluation
 

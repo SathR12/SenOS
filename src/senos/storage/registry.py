@@ -1,7 +1,7 @@
 """SQLite persistence for explicit workload registrations.
 
-RegisteredWorkload is a local persistence record, not a replacement for the
-shared Workload contract owned by the contracts contributor.
+RegisteredWorkload is the persistence record; to_workload maps it explicitly
+to the shared Workload contract without generating a new identity.
 """
 
 from contextlib import closing
@@ -11,6 +11,7 @@ from pathlib import Path
 import sqlite3
 from uuid import uuid4
 
+from senos.contracts import Workload
 from senos.workloads.errors import RegistrationError
 
 
@@ -21,6 +22,16 @@ class RegisteredWorkload:
     unit: str
     manager: str
     registered_at: str
+
+    def to_workload(self) -> Workload:
+        """Preserve persisted identity, timestamp, and manager for consumers."""
+        return Workload(
+            workload_id=self.id,
+            name=self.name,
+            unit=self.unit,
+            manager=self.manager,
+            registered_at=self.registered_at,
+        )
 
 
 class RegistryStore:

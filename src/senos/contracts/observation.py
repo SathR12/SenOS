@@ -23,11 +23,11 @@ class Observation(ContractModel):
     workload_id: UUID
     observed_at: AwareDatetime = Field(default_factory=utc_now)
     state: WorkloadState
-    cpu_usage_percent: float = Field(
-        ge=0,
+    cpu_usage_percent: float | None = Field(
+        default=None, ge=0,
         description="CPU use where 100 percent represents one fully used logical CPU.",
     )
-    memory_usage_bytes: int = Field(ge=0)
+    memory_usage_bytes: int | None = Field(default=None, strict=True, ge=0, description="Workload cgroup memory.current in bytes; None means unavailable.")
     cpu_pressure_some_avg10: Percent | None = None
     memory_pressure_some_avg10: Percent | None = None
     memory_pressure_full_avg10: Percent | None = None

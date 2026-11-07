@@ -2,20 +2,19 @@
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-import re
 import subprocess
 import sys
+
+from senos.contracts.workload import validate_unit_name
 
 from .errors import RegistrationError
 
 
-# Initial subset: simple units and instantiated templates, without escapes.
-_UNIT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.:@-]*\.(?:service|scope)")
-
-
 def validate_unit(unit: str) -> None:
-    if len(unit) > 255 or not _UNIT.fullmatch(unit) or "@." in unit:
-        raise RegistrationError("Use an explicit .service or .scope name, without paths, patterns, or shell syntax")
+    try:
+        validate_unit_name(unit)
+    except ValueError as error:
+        raise RegistrationError(str(error)) from error
 
 
 @dataclass(frozen=True)
