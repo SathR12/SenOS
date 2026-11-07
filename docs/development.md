@@ -1,6 +1,6 @@
 # Development
 
-This repository provides the folder and Python package skeleton, uv dependency configuration, and a placeholder `senos` CLI. Environment preflight and working CLI commands are not implemented yet.
+This repository provides the folder and Python package skeleton, uv dependency configuration, and a `senos` CLI whose `status` command shows fake telemetry from `senos.telemetry.fake`, so it runs on macOS. Environment preflight, real telemetry, and the other CLI commands are not implemented yet.
 
 Set up with:
 

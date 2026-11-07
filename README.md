@@ -14,7 +14,7 @@ SenOS runs in Linux user space and uses existing operating-system controls. It d
 
 ## Project status
 
-This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and a `senos` CLI skeleton runs, but its commands other than `version` are placeholders. Agent behavior, telemetry, and resource control are not implemented.
+This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and a `senos` CLI skeleton runs. `senos status` displays fake telemetry; `register` and `restore` are placeholders. Agent behavior, real telemetry, and resource control are not implemented.
 
 **We are building the CLI first.** A UI can follow once the controller, safety checks, and experiments work. Both interfaces should use the same application services and validated data contracts.
 
@@ -191,7 +191,7 @@ Agree on shared contracts and their example payloads before implementing modules
 5. Implement observe-only telemetry before enabling writes.
 6. Add one bounded CPU-weight operation, then verify restoration, rejected actions, and crash recovery.
 
-To set up a development environment, install [uv](https://docs.astral.sh/uv/) and run `uv sync`. Run the tests with `uv run pytest` and the CLI with `uv run senos --help`. Only `senos version` works so far; the other commands exit with "not implemented yet".
+To set up a development environment, install [uv](https://docs.astral.sh/uv/) and run `uv sync`. Run the tests with `uv run pytest` and the CLI with `uv run senos --help`. `senos version` and `senos status` work (status shows fake data until real telemetry exists); `register` and `restore` exit with "not implemented yet".
 
 ## Evaluation
 
