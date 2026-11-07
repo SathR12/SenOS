@@ -14,7 +14,7 @@ SenOS runs in Linux user space and uses existing operating-system controls. It d
 
 ## Project status
 
-This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Agent behavior, dependencies, and resource control are not implemented; there is no runnable CLI yet.
+This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and a `senos` CLI skeleton runs, but its commands other than `version` are placeholders. Agent behavior, telemetry, and resource control are not implemented.
 
 **We are building the CLI first.** A UI can follow once the controller, safety checks, and experiments work. Both interfaces should use the same application services and validated data contracts.
 
@@ -120,14 +120,14 @@ Start with systemd `CPUWeight`, which adjusts relative CPU allocation under cont
 
 ## Repository structure
 
-The folders below are scaffolded. Python modules currently contain documentation placeholders; empty non-package folders use `.gitkeep` so Git preserves them. `pyproject.toml` and `uv.lock` are planned and do not exist yet.
+The folders below are scaffolded. Python modules other than the CLI currently contain documentation placeholders; empty non-package folders use `.gitkeep` so Git preserves them.
 
 ```text
 SenOS/
 |-- README.md
 |-- LICENSE
-|-- pyproject.toml                 # Planned: dependencies and tool configuration
-|-- uv.lock                        # Planned: generated dependency lockfile
+|-- pyproject.toml                 # Dependencies and tool configuration
+|-- uv.lock                        # Generated dependency lockfile
 |-- src/
 |   `-- senos/
 |       |-- cli.py                 # CLI entry point
@@ -191,7 +191,7 @@ Agree on shared contracts and their example payloads before implementing modules
 5. Implement observe-only telemetry before enabling writes.
 6. Add one bounded CPU-weight operation, then verify restoration, rejected actions, and crash recovery.
 
-Installation and CLI commands will be documented once implemented. There are no working setup commands to run from this repository yet.
+To set up a development environment, install [uv](https://docs.astral.sh/uv/) and run `uv sync`. Run the tests with `uv run pytest` and the CLI with `uv run senos --help`. Only `senos version` works so far; the other commands exit with "not implemented yet".
 
 ## Evaluation
 
