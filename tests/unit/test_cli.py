@@ -13,7 +13,7 @@ def test_version_prints_package_version():
 
 
 def test_placeholder_commands_fail_until_implemented():
-    for args in (["status"], ["register", "editor", "--unit", "editor.service"], ["restore"]):
+    for args in (["status"], ["restore"]):
         result = runner.invoke(app, args)
 
         assert result.exit_code == 1
