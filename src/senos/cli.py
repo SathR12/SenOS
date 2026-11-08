@@ -22,6 +22,36 @@ app = typer.Typer(
 )
 
 
+agent_app = typer.Typer(help="Evaluate proposal agents without applying resource policies.", no_args_is_help=True)
+app.add_typer(agent_app, name="agent")
+
+
+@agent_app.command("cpu")
+def cpu_agent(
+    demo: bool = typer.Option(False, "--demo", help="Evaluate a synthetic CPU-contention scenario."),
+    input_path: Path | None = typer.Option(None, "--input", help="Read a CPUContext JSON file instead of the demo."),
+    json_output: bool = typer.Option(False, "--json", help="Print the full validated decision and proposal as JSON."),
+) -> None:
+    """Propose a bounded CPU-weight change; never execute it."""
+    from senos.agents.runner import run_cpu
+
+    if (demo and input_path is not None) or (not demo and input_path is None):
+        raise typer.BadParameter("Choose exactly one of --demo or --input PATH")
+    try:
+        result = run_cpu(input_path=input_path)
+    except (OSError, ValueError) as error:
+        typer.echo(f"Invalid CPU context: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    if json_output:
+        typer.echo(json.dumps(result))
+        return
+    decision = result["decision"]
+    typer.echo(f"DRY RUN ({result['source']}): {decision['status']}: {decision['reason']}")
+    if decision["proposal"] is not None:
+        proposal = decision["proposal"]
+        typer.echo(f"Would set CPUWeight {proposal['expected_cpu_weight']} -> {proposal['proposed_cpu_weight']} for {proposal['workload_id']}; expires {proposal['expires_at']}")
+
+
 @app.callback()
 def main() -> None:
     """Submit objectives, inspect state, and restore policies."""

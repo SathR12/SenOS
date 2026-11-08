@@ -235,3 +235,15 @@ def test_counter_interval_includes_time_spent_resolving_final_unit(tmp_path):
 def test_invalid_sampling_intervals_are_rejected(interval):
     with pytest.raises(ValueError, match="finite and positive"):
         LinuxTelemetry(interval=interval)
+
+
+def test_non_linux_has_no_default_live_collector(monkeypatch):
+    monkeypatch.setattr(status_service.sys, "platform", "darwin")
+    assert status_service.default_telemetry() is None
+
+
+def test_linux_without_cgroup_v2_has_no_default_live_collector(monkeypatch):
+    from pathlib import Path
+    monkeypatch.setattr(status_service.sys, "platform", "linux")
+    monkeypatch.setattr(Path, "is_file", lambda self: False)
+    assert status_service.default_telemetry() is None

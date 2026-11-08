@@ -13,3 +13,5 @@ uv run senos --help
 Use the [Linux development requirements](../README.md#linux-and-docker-requirements) as the reference. Record the VM image, kernel, systemd version, CPU allocation, memory, and swap configuration before benchmarking.
 
 Use the [registration walkthrough](registration.md) to verify `senos register` in a WSL/Linux systemd user session. The [shared contracts](contracts.md) are integrated through common validators and an identity-preserving registry adapter. See [status usage](status.md) for saved registrations versus demo readings. Live collection returns explicit unavailable values when a measurement cannot be collected. Next: connect validated observation histories to proposal agents, keeping execution separately controlled. Keep credentials and local runtime data out of Git.
+
+The pure CPU proposal agent remains independent of collection. See the [agent guide](agents.md) and run `uv run senos agent cpu --demo`. Live status works, but the agent currently requires explicit demo/file inputs and never applies a policy.
