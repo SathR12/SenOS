@@ -82,8 +82,9 @@ If a workload was removed and registered again, the old intent is rejected.
 Unsupported hosts and invalid registries return a readable error and a nonzero exit.
 
 The reusable [evaluation service](../src/senos/intent/pipeline.py) accepts a shared
-Intent and registry path. A future natural-language provider can resolve its output
-into that contract and invoke the same service. No provider or API key is implemented.
+Intent and registry path. The [single LLM advisor](llm-agent.md) resolves natural-language objectives
+into that contract and invokes the same service. Only the LLM command requires
+a provider API key; structured intent commands remain deterministic.
 
 This is one evaluation, not continuous monitoring. Duration bounds the objective
 and proposal; it does not keep the command running. There is no application,

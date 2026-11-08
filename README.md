@@ -14,7 +14,7 @@ SenOS runs in Linux user space and uses existing operating-system controls. It d
 
 ## Project status
 
-This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, removal through `unregister`, and deterministic `intent prioritize`. `status` reads live CPU, memory, and pressure for registered Linux units and offers explicitly labeled demo readings with `--demo`; `restore` recovers recorded CPU weights; see [restore usage](docs/restore.md). The shared contracts and registry adapter are implemented; see [contract semantics](docs/contracts.md). Live read-only systemd/cgroup v2 telemetry is implemented. A [dry-run CPU proposal agent](docs/agents.md) is implemented. Automatic policy application is not implemented. Restore includes a restricted CPU-weight backend and persistent original-settings journal.
+This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, removal through `unregister`, and deterministic `intent prioritize`. `status` reads live CPU, memory, and pressure for registered Linux units and offers explicitly labeled demo readings with `--demo`; `restore` recovers recorded CPU weights; see [restore usage](docs/restore.md). The shared contracts and registry adapter are implemented; see [contract semantics](docs/contracts.md). Live read-only systemd/cgroup v2 telemetry is implemented. A [dry-run CPU proposal evaluator](docs/agents.md) and [single LLM advisor](docs/llm-agent.md) are implemented. Explicit `--watch --apply` CPU application is implemented for registered user units, with verified restoration and independent controller-crash recovery; see [CPU execution](docs/cpu-execution.md). Fully autonomous performance optimization is not implemented. Restore includes a restricted CPU-weight backend and persistent original-settings journal.
 
 **We are building the CLI first.** A UI can follow once the controller, safety checks, and experiments work. Both interfaces should use the same application services and validated data contracts.
 
@@ -199,6 +199,14 @@ To set up a development environment, install [uv](https://docs.astral.sh/uv/) an
 
 Use `senos intent prioritize NAME --duration-seconds N` to validate an objective, or add `--evaluate` to collect live telemetry and return a dry-run CPU decision without applying it; see [intent usage](docs/intent.md).
 
+## Natural-language advisor
+
+After configuring `GEMINI_API_KEY` in a local `.env` (or selecting OpenAI with `OPENAI_API_KEY`), run `uv run senos agent run "Prioritize web for ten minutes while keeping build progressing"` with registered workload names. The single LLM uses read-only tools and returns a validated dry-run evaluation. See [setup, limits, and tests](docs/llm-agent.md).
+
+## Continuous observation
+
+Add `--watch --interval 5` to `senos agent run` to monitor the original objective locally after the LLM resolves it once. Use `senos monitor start NAME --duration-seconds 60` without an LLM. Both modes persist history and support cancellation; they remain observe-only unless explicitly authorized with `--apply`; see [monitoring usage](docs/monitoring.md). See [CPU execution](docs/cpu-execution.md) for application and recovery limits.
+
 ## CPU agent demo
 
 ```bash
@@ -216,6 +224,8 @@ Follow [AGENTS.md](AGENTS.md) for coding-agent contributions. Start focused task
 Publish changes through a pull request into `main`, explain the behavior and validation, request at least one teammate review, then squash-merge and delete the task branch. Do not push directly to `main` or force-push shared branches. A maintainer must configure GitHub branch protection separately; this documentation does not enforce it.
 
 ## Evaluation
+
+A runnable [CPU contention benchmark](docs/experiments.md) measures HTTP tail latency, background progress, and dry-run intent proposals using isolated Linux test services. Run `uv run python -m benchmarks.scenarios.cpu_contention` from the repository root. It does not apply policies.
 
 Compare Linux defaults, a manually configured static policy, and the SenOS adaptive policy under the same workload and VM configuration.
 

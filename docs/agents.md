@@ -1,6 +1,6 @@
-# First agent: CPU proposals
+# CPU evaluator and single LLM advisor
 
-The first agent is a deterministic Python module, not an LLM service. It uses the existing Workload, Observation, Intent, and Proposal contracts. It is built and tested independently of the live telemetry collector. `senos status` now supports live Linux readings; the agent runner can now assemble a context from registered workloads and real observations using --target, or accept explicit demo/file inputs. No additional runtime dependencies are required.
+The CPU evaluator is a deterministic Python module. A separate [single LLM advisor](llm-agent.md) uses read-only tools and submits validated objectives to it through `senos agent run`. It uses the existing Workload, Observation, Intent, and Proposal contracts. It is built and tested independently of the live telemetry collector. `senos status` now supports live Linux readings; the agent runner can now assemble a context from registered workloads and real observations using --target, or accept explicit demo/file inputs. No additional runtime dependencies are required.
 
 ## Use the small custom harness
 
@@ -14,7 +14,7 @@ uv run senos agent cpu --input /path/to/context.json --json
 
 Exactly one of --target, --demo, or --input is required. Demo inputs are synthetic. A file is caller-provided data, not independently verified telemetry or proof of registration. Output always says `mode: dry_run` and `source: live`, `demo`, or `file`. Live mode reads the registry, systemd, and cgroup files. No mode writes resource settings or a database, captures restore settings, or applies proposals.
 
-The harness validates a CPUContext and invokes CPUAgent.evaluate. JSON includes the complete context and collection warnings so a recommendation can be inspected. There is no daemon, agent-to-agent messaging system, model provider, or automatic control loop. The CLI only parses inputs and renders outputs; the agent and runner can be reused independently. The live context builder lives in `src/senos/agents/live.py`.
+The harness validates a CPUContext and invokes CPUAgent.evaluate. JSON includes the complete context and collection warnings so a recommendation can be inspected. The CPU harness does not call a model. The separate LLM advisor supports Gemini and OpenAI providers; neither path has a daemon, agent-to-agent messaging, or an autonomous application-feedback optimizer. Explicit supervised application is available separately through [CPU execution](cpu-execution.md). A separate [foreground observer](monitoring.md) repeats local evaluation without executing changes. The CLI only parses inputs and renders outputs; the agent and runner can be reused independently. The live context builder lives in `src/senos/agents/live.py`.
 
 ## Inputs and outputs
 
@@ -63,11 +63,11 @@ For manual verification and a reproducible contention setup, see [live agent tes
 
 A small custom runner makes decisions reproducible and keeps monitoring inexpensive. No language-model calls occur in the periodic decision path. Begin with this measurable baseline before adding a general agent framework.
 
-A future natural-language adapter can interpret a user request into Intent. Optional LLM advice can be added through a narrow adapter after evaluating it against this baseline. It must produce validated structured output and pass independent safety checks. The prompt template in `src/senos/agents/prompts/cpu_advisor.md` is a design starting point; no current command executes it.
+The [single LLM advisor](llm-agent.md) interprets a request through closed read-only tools and submits an Intent to this baseline. Model rationale remains separate from the authoritative deterministic CPU decision. The prompt template in `src/senos/agents/prompts/cpu_advisor.md` is a design starting point; no current command executes it.
 
 ## Before automatic execution
 
-A future controller must fetch real observations and current weights, verify registration against the real registry, resolve cgroup/instance identity, validate proposals and preserved-workload constraints, enforce cooldowns using persisted action history, serialize capture/apply/restore, verify effects, enforce expiration, and recover after failure. The existing restore hook is available, but there is no automatic apply pipeline yet.
+A future controller must fetch real observations and current weights, verify registration against the real registry, resolve cgroup/instance identity, validate proposals and preserved-workload constraints, enforce cooldowns using persisted action history, serialize capture/apply/restore, verify effects, enforce expiration, and recover after failure. The existing restore hook is available, but explicit supervised application is now available through [CPU execution](cpu-execution.md).
 
 ## Files and tests
 

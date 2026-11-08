@@ -7,6 +7,7 @@ reuse the same application services.
 from dataclasses import asdict
 from importlib.metadata import version
 import json
+import math
 from pathlib import Path
 
 import typer
@@ -25,8 +26,182 @@ intent_app = typer.Typer(help="Submit validated workload objectives.")
 app.add_typer(intent_app, name="intent")
 
 
-agent_app = typer.Typer(help="Evaluate proposal agents without applying resource policies.", no_args_is_help=True)
+agent_app = typer.Typer(help="Evaluate resource goals; CPU changes require explicit --watch --apply.", no_args_is_help=True)
 app.add_typer(agent_app, name="agent")
+
+
+monitor_app = typer.Typer(help="Monitoring sessions and local history; dry-run by default.", no_args_is_help=True)
+app.add_typer(monitor_app, name="monitor")
+
+
+def _watch_intent(intent_payload, database, monitor_db, interval, max_cycles, json_output, *, initial=None, apply=False):
+    from senos.agents.monitor import monitor_intent
+    from senos.contracts import Intent
+    from senos.storage.monitor import MonitorError
+
+    history = monitor_db if monitor_db is not None else database.parent / "monitor.sqlite3"
+    def started(run_id):
+        if json_output:
+            typer.echo(json.dumps({"event": "started", "run_id": run_id, "monitor_database": str(history.resolve()), "mode": "apply" if apply else "dry_run", "executed": False}))
+        else:
+            typer.echo(f"Monitor run {run_id}; history={history}. Ctrl+C stops observation.")
+    def observed(event):
+        if json_output:
+            typer.echo(json.dumps({"event": "cycle", **event}))
+            return
+        evaluation = event["evaluation"]
+        decision = evaluation["decision"]
+        target = evaluation["intent"]["target_workload_id"]
+        samples = [sample for sample in evaluation["context"]["observations"] if sample["workload_id"] == target]
+        latest = samples[-1] if samples else {}
+        cpu, pressure = latest.get("cpu_usage_percent"), latest.get("cpu_pressure_some_avg10")
+        cpu_text = "N/A" if cpu is None else f"{cpu:.1f}%"
+        psi_text = "N/A" if pressure is None else f"{pressure:.1f}%"
+        label = "APPLY MODE" if apply else "DRY RUN"
+        typer.echo(f"Cycle {event['cycle']}: {label} {decision['status']}; CPU={cpu_text}; PSI={psi_text}: {decision['reason']}")
+        if evaluation.get("execution") is not None:
+            action = evaluation["execution"]
+            typer.echo(f"CPU action: {action['status']}; requested={action['requested_cpu_weight']}; effective={action['effective_cpu_weight']}: {action['reason']}")
+        elif decision["proposal"] is not None:
+            proposal = decision["proposal"]
+            typer.echo(f"Would set CPUWeight {proposal['expected_cpu_weight']} -> {proposal['proposed_cpu_weight']} (not applied)")
+    try:
+        result = monitor_intent(Intent.model_validate(intent_payload), database, history,
+            interval=interval, max_cycles=max_cycles, initial_evaluation=initial, apply=apply,
+            on_event=observed, on_start=started)
+    except (MonitorError, ValueError) as error:
+        typer.echo(f"senos monitor: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    if json_output:
+        typer.echo(json.dumps({"event": "finished", "result": result}))
+    else:
+        if apply:
+            typer.echo(f"Monitoring {result['status']} after {result['cycles']} cycles. Original CPU settings restored and verified.")
+        else:
+            typer.echo(f"Monitoring {result['status']} after {result['cycles']} cycles. No resource policy was applied.")
+
+
+@monitor_app.command("start")
+def monitor_start(
+    apply: bool = typer.Option(False, "--apply", help="Apply validated CPU boosts and restore on exit; user units only."),
+    target: str = typer.Argument(..., help="Registered workload to observe."),
+    duration_seconds: int = typer.Option(..., "--duration-seconds", min=1, max=86400),
+    preserve: list[str] = typer.Option([], "--preserve"),
+    interval: float = typer.Option(5, "--interval", min=1, max=60),
+    max_cycles: int | None = typer.Option(None, "--max-cycles", min=1, max=10000),
+    db: Path | None = typer.Option(None, "--db", envvar="SENOS_REGISTRY_PATH"),
+    monitor_db: Path | None = typer.Option(None, "--monitor-db"),
+    json_output: bool = typer.Option(False, "--json", help="Stream JSON Lines events."),
+) -> None:
+    """Monitor a structured intent without an LLM; --apply enables bounded CPU changes."""
+    database = db if db is not None else default_registry_path()
+    try:
+        intent = IntentService(Registry(database)).prioritize(target, duration_seconds, tuple(preserve))
+    except IntentError as error:
+        typer.echo(f"senos monitor: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    _watch_intent(intent.model_dump(mode="json"), database, monitor_db, interval, max_cycles, json_output, apply=apply)
+
+
+def _monitor_store(path):
+    from senos.storage.monitor import MonitorStore
+    return MonitorStore(path if path is not None else default_registry_path().parent / "monitor.sqlite3")
+
+
+@monitor_app.command("list")
+def monitor_list(monitor_db: Path | None = typer.Option(None, "--monitor-db")) -> None:
+    """List saved monitoring sessions as JSON; does not start monitoring."""
+    from senos.storage.monitor import MonitorError
+    try:
+        typer.echo(json.dumps({"sessions": _monitor_store(monitor_db).list_runs()}))
+    except MonitorError as error:
+        typer.echo(f"senos monitor: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+@monitor_app.command("show")
+def monitor_show(
+    run_id: str = typer.Argument(...), monitor_db: Path | None = typer.Option(None, "--monitor-db"),
+    limit: int = typer.Option(20, "--limit", min=1, max=100),
+) -> None:
+    """Read saved session details and the latest bounded set of events as JSON."""
+    from senos.storage.monitor import MonitorError
+    store = _monitor_store(monitor_db)
+    try:
+        typer.echo(json.dumps({"session": store.get(run_id), "events": store.events(run_id, limit)}))
+    except MonitorError as error:
+        typer.echo(f"senos monitor: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+@monitor_app.command("stop")
+def monitor_stop(run_id: str = typer.Argument(...), monitor_db: Path | None = typer.Option(None, "--monitor-db")) -> None:
+    """Stop an observation session from another terminal; never modify its workloads."""
+    from senos.storage.monitor import MonitorError
+    try:
+        typer.echo(json.dumps(_monitor_store(monitor_db).stop(run_id)))
+    except MonitorError as error:
+        typer.echo(f"senos monitor: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+
+@agent_app.command("run")
+def llm_agent(
+    request: str = typer.Argument(..., help="Natural-language objective for registered Linux workloads."),
+    db: Path | None = typer.Option(None, "--db", envvar="SENOS_REGISTRY_PATH", help="Registry database."),
+    apply: bool = typer.Option(False, "--apply", help="Authorize bounded CPU application; requires --watch and restores on exit."),
+    watch: bool = typer.Option(False, "--watch", help="Monitor the interpreted objective locally until its original deadline."),
+    interval: float = typer.Option(5, "--interval", min=1, max=60, help="Pause between monitoring cycles, in seconds."),
+    max_cycles: int | None = typer.Option(None, "--max-cycles", min=1, max=10000, help="Stop monitoring after this many cycles."),
+    monitor_db: Path | None = typer.Option(None, "--monitor-db", help="Separate SQLite monitor history database."),
+    provider_name: str | None = typer.Option(None, "--provider", help="gemini or openai; defaults to local configuration or available key."),
+    model: str | None = typer.Option(None, "--model", help="Override the selected provider model."),
+    json_output: bool = typer.Option(False, "--json", help="Print the tool trace and validated evaluation as JSON."),
+) -> None:
+    """Inspect with one LLM agent; explicit --watch --apply enables supervised CPU changes."""
+    from senos.agents.llm import run_agent
+    from senos.agents.provider import AgentError
+
+    if apply and not watch:
+        raise typer.BadParameter("--apply requires --watch so restoration is supervised")
+    if not watch and (interval != 5 or max_cycles is not None or monitor_db is not None):
+        raise typer.BadParameter("--interval, --max-cycles, and --monitor-db require --watch")
+    if not math.isfinite(interval):
+        raise typer.BadParameter("--interval must be finite")
+    database = db if db is not None else default_registry_path()
+    try:
+        result = run_agent(request, database, model=model, provider_name=provider_name)
+    except AgentError as error:
+        typer.echo(f"senos agent: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    if watch and result["status"] == "evaluated":
+        if json_output:
+            typer.echo(json.dumps({"event": "agent", "result": result}))
+        else:
+            typer.echo(f"LLM objective resolved once ({result['agent']['model']}); remaining cycles use local code.")
+            typer.echo(f"Agent rationale: {result['rationale']}")
+        _watch_intent(result["evaluation"]["intent"], database, monitor_db, interval, max_cycles, json_output, initial=result["evaluation"], apply=apply)
+        return
+    if json_output:
+        typer.echo(json.dumps(result))
+        return
+    typer.echo(f"LLM agent ({result['agent']['model']}): {result['status']}")
+    if result["status"] == "clarification":
+        typer.echo(result["question"])
+    elif result["status"] == "unsupported":
+        typer.echo(result["reason"])
+    else:
+        typer.echo(f"Agent rationale: {result['rationale']}")
+        evaluation = result["evaluation"]
+        intent, decision = evaluation["intent"], evaluation["decision"]
+        typer.echo(f"Validated intent: target={intent['target_workload_id']}; duration={intent['duration_seconds']} seconds")
+        for warning in evaluation["warnings"]:
+            typer.echo(f"Note: {warning}")
+        typer.echo(f"DRY RUN: {decision['status']}: {decision['reason']}")
+        if decision["proposal"] is not None:
+            proposal = decision["proposal"]
+            typer.echo(f"Would set CPUWeight {proposal['expected_cpu_weight']} -> {proposal['proposed_cpu_weight']}; expires {proposal['expires_at']}")
+    typer.echo("No resource policy was applied.")
 
 
 @agent_app.command("cpu")
