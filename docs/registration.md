@@ -33,7 +33,7 @@ Stop the demo when finished:
 systemctl --user stop senos-demo.service
 ```
 
-Stopping a workload does not delete its registration. Future telemetry and execution must resolve current unit state again; a saved registration is not proof a workload is still running or safe to change.
+Stopping a workload does not delete its registration. Telemetry resolves current unit state again on every status call, and future execution must too; a saved registration is not proof a workload is still running or safe to change.
 
 ## Remove registrations
 

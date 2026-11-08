@@ -35,7 +35,8 @@ def test_register_real_user_service_across_cli_processes(tmp_path):
         status = json.loads(subprocess.run(status_command, check=True, capture_output=True, text=True, timeout=10).stdout)
         assert status["source"] == "registry"
         assert status["workloads"][0]["workload"]["workload_id"] == initial["workload"]["id"]
-        assert status["workloads"][0]["observation"]["cpu_usage_percent"] is None
+        assert status["live_telemetry"] is True
+        assert status["workloads"][0]["observation"]["state"] == "active"
         remove_command = [sys.executable, "-c", "from senos.cli import app; app()", "unregister", "test-workload", "--db", str(database), "--json"]
         removed = subprocess.run(remove_command, check=True, capture_output=True, text=True, timeout=10)
         assert json.loads(removed.stdout) == {"removed": 1}
