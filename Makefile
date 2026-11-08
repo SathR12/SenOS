@@ -16,3 +16,17 @@ demo-status proof results demo-stop status register remove ask apply prioritize 
 
 test:
 	@bash scripts/run-python.sh -m pytest tests/unit
+
+.PHONY: terminal-app terminal-build terminal-cleanup terminal-status terminal-ai terminal-apply
+terminal-app:
+	@bash scripts/demo/start-app.sh
+terminal-build:
+	@bash scripts/demo/start-build.sh
+terminal-cleanup:
+	@bash scripts/demo/cleanup.sh
+terminal-status:
+	@bash scripts/run-python.sh scripts/demo/control.py status
+terminal-ai:
+	@bash scripts/run-python.sh scripts/demo/control.py ai
+terminal-apply:
+	@bash scripts/run-python.sh scripts/demo/control.py apply

@@ -302,3 +302,5 @@ Use `DURATION=120` with `prioritize` to change its duration, or add `DB=/path/to
 to ordinary commands for a custom registry. Demo helpers select their own registry
 automatically. These shortcuts use the existing project environment and delegate
 to the existing CLI and restricted executor. See [all shortcut details](docs/commands.md).
+
+Wang's optional [terminal throughput demo](scripts/demo/README.md) is also available through `make terminal-app`, `make terminal-build`, `make terminal-ai`, and `make terminal-cleanup`. It uses scoped services and its own registry; the colored bar measures relative throughput, not CPU percentage.

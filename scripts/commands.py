@@ -26,6 +26,10 @@ HELP = '''SenOS shortcuts (inside WSL/Linux)
   make prioritize NAME=web KEEP=build                 Direct CPU control, 60 seconds
   make restore NAME=web             Restore one workload
   make cli ARGS="status --json"     Any existing CLI options
+  make terminal-app                 Wang terminal throughput demo (terminal 1)
+  make terminal-build               Competing terminal workload (terminal 2)
+  make terminal-ai                  One-minute AI objective for terminal demo
+  make terminal-cleanup             Restore and stop owned terminal demo services
   make test                         Unit tests
 Optional DB=/path/to/registry.sqlite3 selects a custom registry for normal commands.
 Demo commands automatically use their separate registry. Ctrl+C stops a foreground demo.
