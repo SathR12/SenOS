@@ -2,8 +2,9 @@
 
 The first intent command turns explicit CLI options into a validated shared
 `Intent` contract. It resolves workload names through the persistent registry.
-It does not call a language model, persist a pending objective, create a policy
-proposal, or change Linux resource settings.
+By default it only validates. With `--evaluate`, it collects live telemetry and
+returns a deterministic CPU proposal or a no-action decision. Neither mode calls
+a language model, persists a pending objective, or changes Linux resource settings.
 
 Register the target and any workloads that must keep progressing before
 submitting an intent:
@@ -40,10 +41,10 @@ The JSON envelope contains `accepted: true`, `executed: false`, and the shared
 resolved CLI arguments. Use `--db PATH` or `SENOS_REGISTRY_PATH` to select the
 same registry used by `register`, `unregister`, and `status`.
 
-The application service lives in `src/senos/intent/service.py`; CLI parsing and
-rendering remain in `src/senos/cli.py`. The service returns an immutable
+The [application service](../src/senos/intent/service.py) handles intent validation; CLI parsing and
+rendering remain in the [CLI module](../src/senos/cli.py). The service returns an immutable
 `Intent`, allowing a future UI or orchestrator to reuse it. The existing
-top-level `restore` command remains the planned restoration interface rather
+top-level `restore` command remains the restoration interface for recorded CPU settings rather
 than adding a second `intent restore` spelling.
 
 ## Verification
@@ -54,5 +55,40 @@ uv run pytest tests/unit/test_intent_command.py
 
 Tests cover registry name and UUID lookup, target and preservation resolution,
 contract validation, JSON output, readable errors, environment configuration,
-and the guarantee that intent submission does not contact systemd. Linux
-integration is not required until intents reach live telemetry or the executor.
+and the guarantee that validation-only submission does not contact systemd.
+Evaluation tests cover original intent identity and expiration, replaced workload
+identities, proposals, no-action decisions, unsupported hosts, and read-only behavior.
+Opt-in Linux integration verifies the CLI leaves CPU weights and registry bytes unchanged.
+
+## Evaluate the deterministic path
+
+```bash
+uv run senos intent prioritize editor --duration-seconds 600 --preserve build --evaluate
+uv run senos intent prioritize editor --duration-seconds 600 --preserve build --evaluate --json
+```
+
+Run on Linux with systemd and cgroup v2, using registered workload names. Collection
+usually takes a few seconds. The path is structured options -> validated Intent ->
+live observations and measured weights -> deterministic CPU decision -> optional Proposal.
+Text output shows the reason and proposed weight change, followed by an explicit
+no-policy-applied message. Low pressure or insufficient evidence correctly returns
+`no_action`; this is a successful evaluation rather than an error.
+
+Evaluation JSON adds `mode: dry_run`, `source: live`, `context`, `warnings`, and
+`decision` to the existing `accepted`, `executed`, and `intent` fields. `executed`
+remains false, including when a proposal is returned. The original intent ID,
+submission time, workload IDs, and deadline are preserved through evaluation.
+If a workload was removed and registered again, the old intent is rejected.
+Unsupported hosts and invalid registries return a readable error and a nonzero exit.
+
+The reusable [evaluation service](../src/senos/intent/pipeline.py) accepts a shared
+Intent and registry path. The [single LLM advisor](llm-agent.md) resolves natural-language objectives
+into that contract and invokes the same service. Only the LLM command requires
+a provider API key; structured intent commands remain deterministic.
+
+This is one evaluation, not continuous monitoring. Duration bounds the objective
+and proposal; it does not keep the command running. There is no application,
+expiration worker, or progress guarantee for preserved workloads. For a controlled
+contention experiment, follow the [live-agent testing guide](live-agent-testing.md)
+and use the intent command above with that guide's registered names and database.
+The separate `senos agent cpu` command remains available for live/demo/file inputs.

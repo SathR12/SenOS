@@ -1,4 +1,6 @@
 import json
+import sqlite3
+from uuid import uuid4
 
 import pytest
 from typer.testing import CliRunner
@@ -187,3 +189,44 @@ def test_missing_registry_is_readable_and_not_created(tmp_path):
     assert "not registered" in result.output
     assert "Traceback" not in result.output
     assert not database.parent.exists()
+
+
+@pytest.mark.parametrize("duration", [True, 1.5, "60", None])
+def test_service_rejects_non_integer_or_missing_duration(registered, duration):
+    _, registry, _, _, _ = registered
+    with pytest.raises(IntentError):
+        IntentService(registry).prioritize("editor", duration)
+
+
+def test_intent_submission_is_read_only_and_trims_names(registered):
+    database, registry, editor, build, _ = registered
+    before = database.read_bytes()
+    intent = IntentService(registry).prioritize(" editor ", 60, (" build ",))
+    assert intent.target_workload_id == editor.workload_id
+    assert intent.preserve_workload_ids == (build.workload_id,)
+    assert database.read_bytes() == before
+
+
+def test_unknown_uuid_and_sql_like_name_are_not_resolved(registered):
+    _, registry, _, _, _ = registered
+    with pytest.raises(RegistrationError, match="not registered"):
+        registry.get_by_id(uuid4())
+    with pytest.raises(RegistrationError, match="not registered"):
+        registry.get_by_name("' OR 1=1 --")
+    assert len(registry.list_workloads()) == 3
+
+
+@pytest.mark.parametrize("corruption", ["invalid-contract", "invalid-database"])
+def test_cli_reports_corrupt_saved_data_without_traceback(registered, corruption):
+    database, _, _, _, _ = registered
+    if corruption == "invalid-contract":
+        with sqlite3.connect(database) as connection:
+            connection.execute("UPDATE registered_workloads SET id = 'bad-id' WHERE name = 'editor'")
+    else:
+        database.write_bytes(b"not a sqlite database")
+    result = CliRunner().invoke(app, [
+        "intent", "prioritize", "editor", "--duration-seconds", "60", "--db", str(database),
+    ])
+    assert result.exit_code == 1
+    assert "senos intent:" in result.output
+    assert "Traceback" not in result.output

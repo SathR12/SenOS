@@ -67,7 +67,7 @@ Unregistering only deletes registry rows. Applications continue running, and sto
 - Targets must be loaded, active, and have a dedicated non-root cgroup. Arbitrary PIDs and ordinary shell-launched applications are outside this initial command's scope; launch test workloads through systemd first.
 - The default database lives outside the repository. If overriding it, keep runtime databases out of Git.
 
-The storage adapter keeps a small persistence record and converts it to the [shared Workload contract](contracts.md), preserving identity, timestamp, and user/system manager. The application-level registry returns shared contracts and supports exact lookup by name or UUID. Registry and contract name/unit validation are shared. Registration JSON retains its existing `id` field. The registry supports unregister as described above; rename is not implemented. `status` reads live metrics on supported Linux hosts; see [status usage](status.md). `restore` supports recorded CPU settings; see [restore usage](restore.md).
+The storage adapter converts persistence records to the [shared Workload contract](contracts.md), preserving identity, timestamp, and user/system manager. The application registry returns shared contracts and supports exact name or UUID lookup. Registry and contract name/unit validation are shared. Registration JSON retains its existing `id` field. The registry supports unregister as described above; rename is not implemented. `status` reads live metrics on supported Linux hosts and shows unavailable values otherwise; see [status usage](status.md). `restore` supports recorded CPU settings; see [restore usage](restore.md).
 
 ## Verification
 

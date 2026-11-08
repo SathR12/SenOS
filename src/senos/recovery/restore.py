@@ -7,6 +7,7 @@ from typing import Protocol
 from senos.contracts import Workload
 
 from senos.executor.cpu import CPUState, SystemdCPUBackend
+from senos.executor.locking import serialized
 from senos.storage.changes import CPUJournal
 from senos.storage.registry import RegisteredWorkload, RegistryStore
 from senos.workloads.errors import RegistrationError
@@ -45,6 +46,7 @@ class RestoreService:
         except RegistrationError as error:
             raise RestoreError(str(error)) from error
 
+    @serialized
     def capture(self, name: str) -> None:
         """Future executor hook: persist original BEFORE making any change.
 
@@ -62,6 +64,7 @@ class RestoreService:
             raise RestoreError("Unit restarted or changed cgroup; refusing to modify a different invocation")
         return state
 
+    @serialized
     def restore(self, name: str | None = None, *, dry_run: bool = False) -> list[RestoreOutcome]:
         records = self._workloads()
         if name is not None:

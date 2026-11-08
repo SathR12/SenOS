@@ -35,3 +35,6 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# CPU-operation coordination locks
+*.cpu.lock

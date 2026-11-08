@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from senos.executor.cpu import SystemdCPUBackend
+from senos.telemetry.linux import LinuxTelemetry
 from senos.workloads.registry import Registry
 
 pytestmark = pytest.mark.skipif(
@@ -17,7 +18,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_live_cpu_command_is_read_only_and_uses_real_workloads(tmp_path):
+@pytest.mark.parametrize("entry", ["agent", "intent"])
+def test_live_cpu_command_is_read_only_and_uses_real_workloads(tmp_path, entry):
     units = [f"senos-agent-test-{uuid4().hex}.service" for _ in range(2)]
     database = tmp_path / "registry.sqlite3"
     registry = Registry(database)
@@ -30,15 +32,27 @@ def test_live_cpu_command_is_read_only_and_uses_real_workloads(tmp_path):
         before_database = database.read_bytes()
         backend = SystemdCPUBackend()
         before = [backend.read(record) for record in records]
+        telemetry = LinuxTelemetry()
+        effective_before = [telemetry.read_cpu_weight(record).weight for record in records]
         command = [sys.executable, "-c", "from senos.cli import app; app()", "agent", "cpu", "--target", "target", "--preserve", "background", "--db", str(database), "--json"]
+        if entry == "intent":
+            command = [sys.executable, "-c", "from senos.cli import app; app()", "intent", "prioritize", "target", "--duration-seconds", "600", "--preserve", "background", "--evaluate", "--db", str(database), "--json"]
         result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=40)
         payload = json.loads(result.stdout)
         assert payload["mode"] == "dry_run" and payload["source"] == "live"
+        if entry == "intent":
+            assert payload["executed"] is False
+            assert payload["intent"] == payload["context"]["intent"]
         assert payload["decision"]["status"] == "no_action"
         assert payload["context"]["intent"]["target_workload_id"] == str(records[0].workload_id)
-        assert payload["context"]["current_cpu_weights"][str(records[0].workload_id)] == 100
-        assert len(payload["context"]["observations"]) == 6
+        assert payload["context"]["current_cpu_weights"][str(records[0].workload_id)] == effective_before[0]
+        assert len(payload["context"]["observations"]) == 3 * sum(
+            weight is not None for weight in effective_before
+        )
+        if any(weight is None for weight in effective_before):
+            assert payload["warnings"]
         assert [backend.read(record) for record in records] == before
+        assert [telemetry.read_cpu_weight(record).weight for record in records] == effective_before
         assert database.read_bytes() == before_database
     finally:
         for unit in units:
