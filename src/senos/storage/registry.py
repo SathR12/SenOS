@@ -51,6 +51,17 @@ class RegistryStore:
                 registered_at TEXT NOT NULL,
                 UNIQUE(unit, manager)
             )""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS cpu_restore_points (
+                workload_id TEXT PRIMARY KEY,
+                unit TEXT NOT NULL,
+                manager TEXT NOT NULL CHECK(manager IN ('user', 'system')),
+                original_weight INTEGER CHECK(original_weight BETWEEN 1 AND 10000),
+                invocation_id TEXT NOT NULL,
+                cgroup TEXT NOT NULL,
+                captured_at TEXT NOT NULL,
+                restored_at TEXT,
+                last_error TEXT
+            )""")
         except sqlite3.Error:
             connection.close()
             raise
@@ -84,6 +95,32 @@ class RegistryStore:
         except (OSError, sqlite3.Error) as error:
             raise RegistrationError("Cannot read registry database; check its path and permissions") from error
 
+    def get_by_name(self, name: str) -> RegisteredWorkload:
+        """Return one persistence record by its unique display name."""
+        return self._get_one("name", name)
+
+    def get_by_id(self, workload_id: str) -> RegisteredWorkload:
+        """Return one persistence record by its stable UUID string."""
+        return self._get_one("id", workload_id)
+
+    def _get_one(self, column: str, value: str) -> RegisteredWorkload:
+        if not self.path.exists():
+            raise RegistrationError(f"Workload {value!r} is not registered")
+        query = {
+            "name": "SELECT * FROM registered_workloads WHERE name = ?",
+            "id": "SELECT * FROM registered_workloads WHERE id = ?",
+        }[column]
+        try:
+            uri = self.path.resolve().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(uri, uri=True, timeout=5)) as connection:
+                connection.row_factory = sqlite3.Row
+                row = connection.execute(query, (value,)).fetchone()
+                if row is None:
+                    raise RegistrationError(f"Workload {value!r} is not registered")
+                return RegisteredWorkload(**dict(row))
+        except (OSError, sqlite3.Error) as error:
+            raise RegistrationError("Cannot read registry database; check its path and permissions") from error
+
 
     def remove(self, name: str | None = None) -> int:
         """Delete one named record, or all records when name is None.
@@ -97,6 +134,13 @@ class RegistryStore:
             raise RegistrationError(f"Workload {name!r} is not registered")
         try:
             with closing(self._connect()) as connection, connection:
+                connection.execute("BEGIN IMMEDIATE")
+                pending = connection.execute(
+                    """SELECT 1 FROM cpu_restore_points p JOIN registered_workloads w ON w.id = p.workload_id
+                       WHERE p.restored_at IS NULL AND (? IS NULL OR w.name = ?) LIMIT 1""", (name, name)
+                ).fetchone()
+                if pending:
+                    raise RegistrationError("Workload has pending changes; run senos restore before unregistering")
                 if name is None:
                     cursor = connection.execute("DELETE FROM registered_workloads")
                 else:

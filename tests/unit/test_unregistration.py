@@ -130,4 +130,4 @@ def test_removed_name_can_be_registered_again_with_new_identity(registry):
     old, _ = registry.register("one", "one.service")
     registry.unregister("one")
     new, created = registry.register("one", "other.service")
-    assert created and new.id != old.id
+    assert created and new.workload_id != old.workload_id

@@ -1,6 +1,6 @@
 # Workload status
 
-The status command combines the persistent registry with an explicit demo mode. It uses the shared Workload and Observation contracts; there is no second set of status-only data models.
+The status command combines the persistent registry with live Linux telemetry and an explicit demo mode. It uses the shared Workload and Observation contracts; there is no second set of status-only data models.
 
 ## Saved registrations
 
@@ -10,11 +10,22 @@ uv run senos status --json
 uv run senos status --db /path/to/registry.sqlite3
 ```
 
-Default status lists actual saved registrations and does not require a Linux systemd session to read them. It does not collect live telemetry yet. Lifecycle state is `unknown`; CPU and memory are shown as `N/A` in the table and `null` in JSON. A saved registration alone does not prove an app is running.
+Default status lists actual saved registrations. On supported Linux hosts with systemd and cgroup v2 it then collects live, read-only telemetry for each one (see below). On other platforms, such as macOS, lifecycle state is `unknown` and readings are `N/A` in the table and `null` in JSON. A saved registration alone does not prove an app is running.
 
-The table includes name, unit, user/system manager, lifecycle state, CPU percent, and memory in MiB. CPU percent follows the shared contract: 100 percent per occupied logical CPU, potentially more than 100 for a multicore workload. MiB is bytes divided by 1024 squared.
+The table includes name, unit, user/system manager, lifecycle state, CPU percent, memory in MiB, and the workload's ten-second CPU pressure (`CPU PSI`, cpu.pressure `some avg10`). CPU percent follows the shared contract: 100 percent per occupied logical CPU, potentially more than 100 for a multicore workload. MiB is bytes divided by 1024 squared.
 
 The database path matches register/unregister: `--db` or `SENOS_REGISTRY_PATH` overrides the default under XDG_STATE_HOME or `~/.local/state/senos/`. Status opens an existing database read-only. A missing database produces an empty list without creating directories or a database. Corrupt data or an invalid existing schema produces a readable nonzero error; status does not repair or overwrite it.
+
+## Live telemetry (Linux)
+
+`src/senos/telemetry/linux.py` reads, and never writes:
+
+1. `systemctl --user|--system show` for each saved unit, resolving its current state and cgroup again each time; cgroups can change after registration.
+2. From that cgroup under `/sys/fs/cgroup`: `cpu.stat` `usage_usec`, `memory.current`, `cpu.pressure`, and `memory.pressure`.
+
+CPU percent is a rate: `usage_usec` is sampled twice with one shared 0.5-second wait for all workloads. Each counter pair uses its own measured monotonic elapsed time, including read overhead. Total status time also includes per-unit systemd/file reads and can exceed half a second. 100 percent is one fully used logical CPU.
+
+State follows systemd `ActiveState`: `active`, `inactive` (including units systemd no longer knows), and `failed`; transitional states and systemd read errors are `unknown`. Only active units with a valid dedicated cgroup are measured. A missing, denied, malformed, or negative reading produces `None` instead of a guess. Cgroup paths are resolved and checked for containment under the configured root, including symlink targets. Units are resolved again after sampling; an invocation ID or cgroup change invalidates the sample even when a new CPU counter is larger than the old one. A stopped unit reports its final state without stale metrics. Counter decreases also make CPU usage unavailable.
 
 ## Explicit demo data
 
@@ -30,7 +41,7 @@ Demo mode preserves Wang's sample editor/build readings for developing the CLI w
 JSON contains:
 
 - `source`: `registry` or `demo`.
-- `live_telemetry`: currently always false.
+- `live_telemetry`: true when the live Linux collector was selected; false when the required environment is absent and in demo mode. Individual measurements may still be null after collection failures.
 - `workloads`: rows containing a shared `workload` object and a matching `observation` object. Both use the same workload_id.
 
 Keep source metadata when consuming/exporting demo values so synthetic readings cannot be mistaken for measurements. Ordinary status never substitutes demo readings for missing live data.
@@ -39,8 +50,10 @@ Keep source metadata when consuming/exporting demo values so synthetic readings 
 
 - `src/senos/cli.py`: argument parsing and rendering.
 - `src/senos/telemetry/status.py`: status service and snapshot rows.
+- `src/senos/telemetry/linux.py`: read-only systemd and cgroup v2 telemetry.
 - `src/senos/telemetry/fake.py`: isolated synthetic provider.
 - `src/senos/contracts/`: shared validation and schema definitions.
+- `src/senos/workloads/registry.py`: application-level shared-contract access.
 - `src/senos/storage/registry.py`: persistent records and read-only listing.
 
-The status tests cover registry data, empty/missing databases, invalid data, JSON identities, explicit demo labeling, no default demo fallback, and registration removal. The opt-in WSL/Linux systemd test also exercises registration, status, and unregistration across separate CLI processes. Live telemetry and resource control remain future work.
+The status tests cover registry data, empty/missing databases, invalid data, JSON identities, explicit demo labeling, no default demo fallback, and registration removal. `tests/unit/test_telemetry.py` covers live readings against fake cgroup files, including multicore CPU, non-active states, invalid cgroup paths, missing files, and counter resets. The opt-in WSL/Linux systemd tests exercise registration, status, and unregistration across separate CLI processes, and measure a real busy-loop unit. System-wide pressure and automatic policy application remain future work. Recorded CPU restoration is available separately through [restore](restore.md).

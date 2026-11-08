@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 from senos.cli import app
 from senos.contracts import Observation, Workload
 from senos.storage.registry import RegistryStore
-from senos.telemetry import fake
+from senos.telemetry import fake, status as status_service
 from senos.telemetry.status import get_status
 from senos.workloads.registry import Registry
 from senos.workloads.systemd import UnitInfo
@@ -18,12 +18,19 @@ class Resolver:
         return UnitInfo(unit=unit, cgroup="/user.slice/" + unit)
 
 
+@pytest.fixture(autouse=True)
+def no_live_telemetry(monkeypatch):
+    # Keep these registry tests identical on macOS and Linux; live readings
+    # are covered in test_telemetry.py and the opt-in systemd tests.
+    monkeypatch.setattr(status_service, "default_telemetry", lambda: None)
+
+
 def test_empty_registry_is_not_created_by_status(tmp_path):
     database = tmp_path / "absent" / "registry.sqlite3"
     result = CliRunner().invoke(app, ["status", "--db", str(database)])
     assert result.exit_code == 0, result.output
     assert "No workloads registered" in result.output
-    assert "Live telemetry is not implemented" in result.output
+    assert "Live telemetry requires Linux" in result.output
     assert not database.parent.exists()
 
 
@@ -51,8 +58,8 @@ def test_status_json_preserves_registry_identity_and_unavailable_values(tmp_path
     assert payload["source"] == "registry"
     assert payload["live_telemetry"] is False
     row = payload["workloads"][0]
-    assert row["workload"]["workload_id"] == record.id
-    assert row["observation"]["workload_id"] == record.id
+    assert row["workload"]["workload_id"] == str(record.workload_id)
+    assert row["observation"]["workload_id"] == str(record.workload_id)
     assert row["observation"]["cpu_usage_percent"] is None
     assert row["observation"]["memory_usage_bytes"] is None
     assert row["observation"]["state"] == "unknown"

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -65,14 +65,12 @@ def test_registry_adapter_preserves_identity_timestamp_and_manager(tmp_path):
     registry = Registry(tmp_path / "registry.sqlite3", Resolver())
     user, _ = registry.register("user-job", "batch.scope")
     system, _ = registry.register("system-job", "batch.scope", "system")
-    for record in [user, system]:
-        contract = record.to_workload()
-        assert contract.workload_id == UUID(record.id)
-        assert contract.registered_at == datetime.fromisoformat(record.registered_at)
-        assert contract.manager == record.manager
-        assert contract.unit == record.unit
-        assert contract == record.to_workload()
-    assert user.to_workload().manager != system.to_workload().manager
+    for contract in [user, system]:
+        reloaded = registry.get_by_id(contract.workload_id)
+        assert reloaded == contract
+        assert registry.get_by_name(contract.name) == contract
+        assert contract.registered_at.tzinfo is not None
+    assert user.manager != system.manager
 
 
 def test_action_result_rejects_boolean_weight():

@@ -12,8 +12,7 @@ def test_version_prints_package_version():
     assert result.output.strip() == "0.1.0"
 
 
-def test_restore_fails_until_implemented():
-    result = runner.invoke(app, ["restore"])
-
-    assert result.exit_code == 1
-    assert "not implemented yet" in result.output
+def test_restore_without_recorded_changes_is_honest_noop(tmp_path):
+    result = runner.invoke(app, ["restore", "--db", str(tmp_path / "missing.sqlite3")])
+    assert result.exit_code == 0
+    assert "No recorded changes" in result.output
