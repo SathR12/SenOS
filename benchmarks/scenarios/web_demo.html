@@ -1,21 +1,137 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SenOS · live CPU demo</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SenOS live demo</title>
 <style>
-:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#0b1220;color:#e7edf9}body{max-width:1100px;margin:36px auto;padding:0 22px}h1{font-size:36px;margin-bottom:8px}p{line-height:1.6;color:#bdcbe0}.row{display:flex;gap:14px;flex-wrap:wrap}.card{flex:1;min-width:180px;background:#152238;padding:20px;border:1px solid #293b56;border-radius:14px}.label{color:#b8c8df;font-size:14px}.value{font-size:30px;font-weight:650;margin-top:10px}#status{padding:7px 13px;border-radius:20px;background:#243652;font-size:14px}canvas{width:100%;height:250px;background:#152238;border:1px solid #293b56;border-radius:14px;margin-top:18px}table{border-collapse:collapse;width:100%;margin:20px 0;background:#152238}td,th{text-align:left;padding:14px;border-bottom:1px solid #293b56}th{color:#b8c8df;font-size:13px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#152238;padding:18px;border-radius:12px;font-size:13px;max-height:280px;overflow:auto}.good{color:#68e6b7}.bad{color:#ffa89c}small{color:#a9bad3}.notice{border-left:3px solid #8dbdff;padding-left:16px}a{color:#8dbdff}@media(max-width:650px){td,th{padding:8px;font-size:12px}}
-</style></head><body>
-<header><span id="status">Connecting</span><h1>Intent → CPU policy → response time</h1><p>One real HTTP workload and one background computation compete on the same Linux CPU. No artificial delays.</p></header>
-<div class="row"><div class="card"><div class="label">Live phase</div><div class="value" id="phase">Starting</div></div><div class="card"><div class="label">Latest HTTP response</div><div class="value" id="latency">Waiting</div></div><div class="card"><div class="label">Actual CPU weights · web / background</div><div class="value" id="weights">Waiting</div></div></div>
+:root{color-scheme:light;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#b9d8e8;color:#183b59}*{box-sizing:border-box}body{position:relative;isolation:isolate;max-width:1120px;margin:0 auto;padding:48px 36px;overflow-x:hidden;background:linear-gradient(180deg,#9fc9df 0,#c9e0eb 42%,#eef5f7 100%);min-height:100vh}body:before,body:after{content:"";position:fixed;z-index:-1;pointer-events:none;border-radius:999px;opacity:.45;background:#f8fcfd}body:before{width:360px;height:110px;top:82px;left:-120px;box-shadow:75px -28px 0 -12px #f8fcfd,155px 8px 0 -4px #f8fcfd,1040px 120px 0 18px #f8fcfd}body:after{width:260px;height:82px;right:-110px;top:360px;box-shadow:-58px -22px 0 -8px #f8fcfd,-125px 5px 0 4px #f8fcfd}header{margin-bottom:24px}h1{font-size:clamp(34px,6vw,54px);line-height:1.05;letter-spacing:-.04em;margin:18px 0 12px;color:#143b5a;max-width:800px}h2{font-size:21px;margin:0 0 8px;color:#183b59}p{line-height:1.55;color:#3e5b70}.lede{font-size:18px;max-width:780px;margin:0}.row{display:flex;gap:16px;flex-wrap:wrap}.card{flex:1;min-width:210px;background:rgba(249,252,253,.92);backdrop-filter:blur(10px);padding:21px;border:1px solid #a9c5d3;box-shadow:0 12px 30px rgba(42,83,106,.14);border-radius:20px}.label{color:#527087;font-size:13px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}.value{font-size:28px;font-weight:750;margin-top:8px;color:#244b68;line-height:1.15}.support{font-size:13px;color:#527087;margin-top:8px}.status{display:inline-block;padding:8px 15px;border-radius:20px;background:#e4f0f5;color:#205d7d;border:1px solid #8eafbf;font-size:14px;font-weight:700;box-shadow:0 5px 16px rgba(42,83,106,.12)}.timeline{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;list-style:none;padding:0;margin:28px 0}.timeline li{position:relative;padding:13px 10px 13px 38px;border:1px solid #a9c5d3;border-radius:14px;background:rgba(244,249,251,.72);color:#527087;font-size:13px;font-weight:650}.timeline li:before{content:attr(data-step);position:absolute;left:11px;top:10px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:#b9d2de;color:#31566d;font-size:11px}.timeline li.active{background:#fff;border-color:#2d789d;color:#183b59;box-shadow:0 8px 20px rgba(42,83,106,.12)}.timeline li.active:before{background:#2d789d;color:#fff}.timeline li.done:before{content:"✓";background:#17825f;color:#fff}.intent-card{margin-bottom:16px}.intent-card p{margin:5px 0 12px}form{display:flex;gap:10px;flex-wrap:wrap}input{flex:1;min-width:260px;padding:13px 14px;border:1px solid #8eafbf;border-radius:11px;background:#fff;color:#213b52;font:inherit}button{padding:12px 18px;border:0;border-radius:11px;background:#2d789d;color:#fff;font:inherit;font-weight:700;cursor:pointer}button:hover:not(:disabled){background:#216888}button:disabled{opacity:.52;cursor:not-allowed}.try-card{display:grid;grid-template-columns:1fr auto;align-items:center;gap:18px;margin:16px 0}.try-card p{margin:5px 0}.try-result{font-weight:700;color:#244b68;min-height:22px}.notice{border-left:4px solid #3c91b8;padding:13px 16px;background:#eaf3f6;border-radius:0 12px 12px 0;color:#31566d;margin:17px 0}.countdown{font-weight:700;color:#205d7d}.visual{margin:18px 0}.visual-head{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-bottom:10px}.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#527087}.dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:4px}.dot.before{background:#efa84f}.dot.during{background:#20a878}.dot.restored{background:#3c9dd1}.dot.failed{background:#d96a65}canvas{display:block;width:100%;height:180px;background:#f4f9fb;border:1px solid #a9c5d3;border-radius:14px}.summary-bars{margin:18px 0}.bar-row{display:grid;grid-template-columns:110px 1fr 90px;align-items:center;gap:12px;margin-top:14px}.bar-label{font-size:13px;font-weight:700;color:#496b80}.bar-track{height:18px;background:#e2eef3;border-radius:999px;overflow:hidden}.bar-fill{width:0;height:100%;border-radius:999px;transition:width .35s ease}.bar-fill.before{background:#efa84f}.bar-fill.during{background:#20a878}.bar-fill.restored{background:#3c9dd1}.bar-value{text-align:right;font-size:14px;font-weight:750;color:#244b68}.summary-result{display:flex;align-items:baseline;justify-content:space-between;gap:12px;border-top:1px solid #c8dce5;margin-top:18px;padding-top:14px}.summary-result .value{margin:0;font-size:23px}.good{color:#13835f}.bad{color:#b6403d}.pending{color:#6d7f8a}.safety{margin-top:18px}.checks{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px}.check{padding:12px 14px;border-radius:12px;background:#edf5f2;color:#31566d;font-size:14px}.check:before{content:"○";margin-right:8px;color:#718795}.check.verified:before{content:"✓";color:#13835f;font-weight:800}details{background:rgba(249,252,253,.88);border:1px solid #a9c5d3;border-radius:16px;padding:14px 16px;margin-top:14px}summary{cursor:pointer;font-weight:750;color:#244b68}table{border-collapse:separate;border-spacing:0;overflow:hidden;width:100%;margin:16px 0 4px;background:#f7fafb;border:1px solid #a9c5d3;border-radius:12px}td,th{text-align:left;padding:11px;border-bottom:1px solid #c8dce5}tr:last-child td{border-bottom:0}th{color:#496b80;font-size:12px;background:#e2eef3}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#234b67;color:#edf7fa;padding:16px;border-radius:12px;font-size:13px;max-height:260px;overflow:auto}small{color:#527087}.footer{margin-top:18px}.footer a{color:#146e96}@media(max-width:800px){.timeline{grid-template-columns:1fr}.try-card{grid-template-columns:1fr}.checks{grid-template-columns:1fr}}@media(max-width:650px){body{padding:30px 18px}.visual-head,.summary-result{align-items:flex-start;flex-direction:column}.bar-row{grid-template-columns:82px 1fr 72px;gap:8px}td,th{padding:8px;font-size:11px}.value{font-size:24px}}
+</style>
+</head>
+<body>
+<header>
+  <span class="status" id="status">Connecting</span>
+  <h1>Keep working while your build runs</h1>
+  <p class="lede">SenOS helps your app respond, keeps the build moving, then restores your settings.</p>
+</header>
+
+<ol class="timeline" aria-label="Demo progress">
+  <li id="step-1" data-step="1">Start</li>
+  <li id="step-2" data-step="2">Measure</li>
+  <li id="step-3" data-step="3">Decide</li>
+  <li id="step-4" data-step="4">Boost</li>
+  <li id="step-5" data-step="5">Restore</li>
+</ol>
+
+<section class="card intent-card">
+  <div class="label">Your goal</div>
+  <form id="intent-form">
+    <input id="intent" name="intent" maxlength="500" autocomplete="off" value="Keep local-app responsive for one minute while background-build keeps progressing">
+    <button type="submit">Save goal</button>
+  </form>
+  <small id="intent-status">Editable until measurement ends.</small>
+</section>
+
+<section class="card try-card">
+  <div>
+    <div class="label">Try it yourself</div>
+    <h2>Load the local app</h2>
+    <small>Send one real request before and during the boost.</small>
+  </div>
+  <div>
+    <button id="try-app" type="button" disabled>Load app</button>
+    <div class="try-result" id="try-result" aria-live="polite">Waiting</div>
+  </div>
+</section>
+
+<div class="row">
+  <div class="card"><div class="label">Current stage</div><div class="value" id="phase">Starting</div><div class="support countdown" id="countdown">Preparing workloads</div><div class="support"><span id="priority">Normal priority</span><span id="weights" hidden>Waiting</span></div></div>
+  <div class="card"><div class="label">App response</div><div class="value" id="latency">Waiting</div><div class="support">Lower is better</div></div>
+  <div class="card"><div class="label">Background build</div><div class="value" id="background">Starting</div></div>
+</div>
+
 <p class="notice" id="message">Waiting for the local demo server.</p>
-<canvas id="chart" width="1100" height="250" aria-label="Measured HTTP response latency in milliseconds over successive requests"></canvas>
-<small>Recent requests, oldest → newest. Orange: baseline · green: prioritized · blue: restored · gray: intent resolution/transition. Lower latency is better. Failed requests are marked red.</small>
-<table><thead><tr><th>Measured phase</th><th>CPU weights</th><th>Mean latency</th><th>p95 latency</th><th>Successful / failed</th><th>Background batches/s</th><th>Measured span</th></tr></thead><tbody id="results"></tbody></table>
-<div class="row"><div class="card"><div class="label">Baseline → prioritized mean latency</div><div class="value" id="change">Awaiting comparison</div></div><div class="card"><div class="label">Restoration verification</div><div class="value" id="recovery">Pending</div></div></div>
-<p><strong>What this proves:</strong> a bounded CPU weight change can redistribute a contended core. Response-time benefit varies with host load; negative or inconclusive results remain visible. This synthetic illustration does not prove improvements for Zoom or arbitrary desktop apps.</p>
-<details open><summary>Controller events and errors</summary><pre id="events">No controller events yet.</pre></details>
-<p><small>Warmup 10 seconds → measured baseline 15 seconds → one-minute objective → restored measurements 10 seconds. Workloads stop at the end; the dashboard preserves results for five minutes. Baseline summaries survive chart scrolling. Background progress is normalized per second using counter timestamps; phase totals alone are not comparable. <a href="/metrics">Raw metrics JSON</a></small></p>
+
+<section class="card visual" aria-label="Live app response chart">
+  <div class="visual-head">
+    <div><div class="label">Live app response</div><small>Each bar is one measured request. Lower is better.</small></div>
+    <div class="legend" aria-label="Chart legend"><span><i class="dot before"></i>Before</span><span><i class="dot during"></i>Boost</span><span><i class="dot restored"></i>Restored</span><span><i class="dot failed"></i>Failed</span></div>
+  </div>
+  <canvas id="chart" width="1100" height="180" aria-label="Measured local-app response latency in milliseconds over successive requests"></canvas>
+</section>
+
+<section class="card summary-bars" aria-label="Before, during boost, and restored response comparison">
+  <div class="label">Average app response</div>
+  <div class="bar-row"><div class="bar-label">Before</div><div class="bar-track"><div class="bar-fill before" id="bar-before"></div></div><div class="bar-value" id="before-value">Measuring</div></div>
+  <div class="bar-row"><div class="bar-label">During boost</div><div class="bar-track"><div class="bar-fill during" id="bar-during"></div></div><div class="bar-value" id="during-value">Waiting</div></div>
+  <div class="bar-row"><div class="bar-label">Restored</div><div class="bar-track"><div class="bar-fill restored" id="bar-restored"></div></div><div class="bar-value" id="restored-value">Waiting</div></div>
+  <div class="summary-result"><span class="support">Before vs. boost</span><div class="value" id="change">Waiting</div></div>
+</section>
+
+<section class="card safety">
+  <div class="label">Safe by design</div>
+  <h2 id="recovery">Restoration pending</h2>
+  <div class="checks">
+    <div class="check verified">Demo workloads only</div>
+    <div class="check" id="background-check">Build keeps moving</div>
+    <div class="check" id="bounded-check">Temporary boost</div>
+    <div class="check" id="restore-check">Settings restored</div>
+  </div>
+</section>
+
+<details>
+  <summary>About this demo</summary>
+  <p>This uses synthetic workloads on one contended CPU. Preview clicks are not recorded as formal samples, but repeated clicks add load. Results do not predict performance for every app or computer.</p>
+</details>
+
+<details>
+  <summary>Technical measurements</summary>
+  <table>
+    <thead><tr><th>Stage</th><th>Technical CPU weights</th><th>Mean app wait</th><th>p95 app wait</th><th>Successful / failed</th><th>Background batches/s</th><th>Measured span</th></tr></thead>
+    <tbody id="results"></tbody>
+  </table>
+</details>
+
+<details>
+  <summary>What SenOS decided and any errors</summary>
+  <pre id="events">No controller events yet.</pre>
+</details>
+
+<p class="footer"><small>10s warmup &rarr; 15s baseline &rarr; 60s goal &rarr; 10s restore check &middot; <a href="/metrics">Raw metrics</a></small></p>
+
 <script>
 const el=id=>document.getElementById(id),fmt=x=>x==null?'N/A':x.toFixed(1)+' ms';
-function draw(samples){const c=el('chart').getContext('2d'),w=1100,h=250;c.clearRect(0,0,w,h);const max=Math.max(100,...samples.map(s=>s.ms||0))*1.1;c.font='12px system-ui';for(let i=0;i<=4;i++){let y=30+i*48;c.strokeStyle='#293b56';c.beginPath();c.moveTo(65,y);c.lineTo(w-10,y);c.stroke();c.fillStyle='#bdcbe0';c.fillText((max*(1-i/4)).toFixed(0)+' ms',5,y+4)}samples.forEach((s,i)=>{const x=70+i*(w-85)/180;c.fillStyle=s.error?'#ffa89c':({Baseline:'#f3b867',Prioritized:'#68e6b7',Restored:'#8dbdff'}[s.phase]||'#7387a4');const height=s.error?10:(s.ms||0)/max*192;c.fillRect(x,222-height,Math.max(2,(w-85)/180-1),height)});c.fillStyle='#bdcbe0';c.fillText('Successive HTTP requests (not a fixed time axis)',70,244)}
-async function update(){try{const response=await fetch('/metrics',{cache:'no-store'});if(!response.ok)throw Error();const d=await response.json();el('status').textContent=d.mode.toUpperCase()+' · '+d.status;el('status').className=d.status==='failed'?'bad':'';el('phase').textContent=d.stage;el('message').textContent=d.message;const last=d.samples.at(-1);if(last){el('latency').textContent=last.error?'Request failed':fmt(last.ms);el('weights').textContent=last.web+' / '+last.background}el('recovery').textContent=d.restored?'Verified 100 / 100':'Pending';el('recovery').className='value '+(d.restored?'good':'');const delta=d.latency_reduction_percent;el('change').textContent=delta==null?'No verified comparison':Math.abs(delta).toFixed(1)+'% '+(delta>=0?'lower latency':'higher latency');el('change').className='value '+(delta==null?'':delta>=0?'good':'bad');el('results').replaceChildren();for(const name of ['Baseline','Prioritized','Restored']){const s=d.summary[name];const row=document.createElement('tr');for(const value of [name,s?.cpu_weights?.map(w=>w.join(' / ')).join(', ')||'N/A',s?fmt(s.mean_ms):'Waiting',s?fmt(s.p95_ms):'Waiting',s?s.successes+' / '+s.errors:'0 / 0',s?.background_batches_per_second==null?'N/A':s.background_batches_per_second.toFixed(1),s?.measurement_seconds==null?'N/A':s.measurement_seconds.toFixed(1)+' s']){const cell=document.createElement('td');cell.textContent=value;row.appendChild(cell)}el('results').appendChild(row)}draw(d.samples);const events=d.events.map(e=>{const v=e.evaluation||{};const action=v.execution;return e.event==='cycle'?'Cycle '+e.cycle+': '+(action?action.status+' — '+action.reason:v.decision?.reason||'No action'):e.event==='finished'?'Finished: '+(e.status||e.result?.status||'inspect saved monitor history'):e.event==='agent'?'LLM returned a structured objective':e.event||'Controller event'});el('events').textContent=[...d.errors.map(e=>'ERROR: '+e),...events].join('\n')||'No controller events yet.';}catch(error){el('status').textContent='Disconnected';el('message').textContent='The demo server stopped or is unreachable. Last measured results remain displayed; start a fresh run to reconnect.'}}
+let latestState=null,trying=false,chartMaximum=100;
+const phaseLabels={Warmup:'Starting',Baseline:'Measuring','Resolving intent':'Understanding goal',Evaluating:'Checking goal',Prioritized:'Boosting app',Restored:'Restored','No action':'No change',Finished:'Finished',Starting:'Starting'};
+const resultLabels={Baseline:'Before SenOS',Prioritized:'SenOS helping',Restored:'Back to normal'};
+const statusLabels={starting:'STARTING',running:'LIVE',completed:'COMPLETED',no_action:'NO CHANGE',stopped:'STOPPED',failed:'NEEDS ATTENTION'};
+
+el('intent-form').addEventListener('submit',async event=>{event.preventDefault();const input=el('intent'),status=el('intent-status');status.textContent='Saving your request...';try{const response=await fetch('/intent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({intent:input.value})});const result=await response.json();status.textContent=result.message;status.className=response.ok?'good':'bad';}catch(error){status.textContent='Could not reach the demo server.';status.className='bad';}});
+
+el('try-app').addEventListener('click',async()=>{trying=true;const button=el('try-app'),result=el('try-result');button.disabled=true;button.textContent='Loading...';result.textContent='Working...';result.className='try-result pending';try{const response=await fetch('/try-app',{method:'POST'});const data=await response.json();if(!response.ok)throw Error(data.message);result.textContent=data.milliseconds.toFixed(1)+' ms';result.className='try-result good';}catch(error){result.textContent=error.message||'Request failed';result.className='try-result bad';}finally{trying=false;button.textContent='Load app';button.disabled=!(latestState&&latestState.app_available);}});
+
+function draw(samples,baseline){const c=el('chart').getContext('2d'),w=1100,h=180,top=18,bottom=148,plot=bottom-top;c.clearRect(0,0,w,h);chartMaximum=Math.max(chartMaximum,...samples.map(s=>s.ms||0),baseline||0);const scale=chartMaximum*1.1;c.font='12px system-ui';for(let i=0;i<=3;i++){const y=top+i*plot/3;c.strokeStyle='#c6dce6';c.beginPath();c.moveTo(65,y);c.lineTo(w-10,y);c.stroke();c.fillStyle='#52728b';c.fillText((scale*(1-i/3)).toFixed(0)+' ms',5,y+4)}if(baseline!=null){const y=bottom-baseline/scale*plot;c.save();c.setLineDash([6,5]);c.strokeStyle='#b97824';c.beginPath();c.moveTo(65,y);c.lineTo(w-10,y);c.stroke();c.restore();c.fillStyle='#8b611e';c.fillText('baseline',w-62,y-4)}samples.forEach((s,i)=>{const x=70+i*(w-85)/180;c.fillStyle=s.error?'#d96a65':({Baseline:'#efa84f',Prioritized:'#20a878',Restored:'#3c9dd1'}[s.phase]||'#8aa8bb');const height=s.error?9:(s.ms||0)/scale*plot;c.fillRect(x,bottom-height,Math.max(2,(w-85)/180-1),height)});c.fillStyle='#52728b';c.fillText('Older',70,171);c.fillText('Newer',w-48,171)}
+
+function updateSummary(summary,status){const items=[['Baseline','before'],['Prioritized','during'],['Restored','restored']],means=items.map(([phase])=>summary[phase]?.mean_ms).filter(value=>value!=null),max=Math.max(1,...means);for(const [phase,id] of items){const mean=summary[phase]?.mean_ms;el('bar-'+id).style.width=mean==null?'0':Math.max(4,mean/max*100)+'%';el(id+'-value').textContent=mean==null?(phase==='Baseline'?'Measuring':status==='no_action'&&phase==='Prioritized'?'No change':'Waiting'):fmt(mean)}}
+
+function currentStep(d){if(d.step)return d.step;if(d.stage==='Warmup'||d.stage==='Starting')return 1;if(d.stage==='Baseline')return 2;if(d.stage==='Resolving intent'||d.stage==='Evaluating')return 3;if(d.stage==='Prioritized')return 4;return 5}
+function updateTimeline(d){const current=currentStep(d),finished=['completed','no_action','stopped'].includes(d.status);for(let i=1;i<=5;i++){const item=el('step-'+i);item.className=i<current||finished&&i<=current?'done':i===current?'active':''}}
+function intentSeconds(d){for(let i=d.events.length-1;i>=0;i--){const event=d.events[i],intent=event.event==='agent'?event.result?.evaluation?.intent:event.evaluation?.intent;if(intent?.submitted_at&&intent?.duration_seconds){const deadline=Date.parse(intent.submitted_at)+intent.duration_seconds*1000;if(Number.isFinite(deadline))return Math.max(0,Math.ceil((deadline-Date.now())/1000))}}return null}
+function clockText(seconds){return seconds==null?'':Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')}
+function updateCountdown(d){let seconds=d.stage_seconds_remaining,label='';if(d.stage==='Prioritized'){seconds=intentSeconds(d);label='Temporary help ends in '}else if(d.stage==='Warmup')label='Workloads ready in about ';else if(d.stage==='Baseline')label='Comparison starts in ';else if(d.stage==='Restored')label='Finishing verification in ';el('countdown').textContent=seconds==null?(d.stage==='Resolving intent'?'Waiting for one AI response':d.stage==='Evaluating'?'Running deterministic checks':''):(label+clockText(seconds))}
+function weightText(last){if(!last)return['Waiting','Technical value: waiting'];return[last.web>100?'Temporary boost':'Normal priority','Technical values: local app '+last.web+' / background '+last.background]}
+function anyBackgroundProgress(d){return Object.values(d.summary).some(s=>s.background_batches_per_second!=null&&s.background_batches_per_second>0)}
+
+async function update(){try{const response=await fetch('/metrics',{cache:'no-store'});if(!response.ok)throw Error();const d=await response.json();latestState=d;el('status').textContent=d.mode.toUpperCase()+' \u00b7 '+(statusLabels[d.status]||d.status.toUpperCase());el('status').className='status '+(d.status==='failed'?'bad':'');el('phase').textContent=phaseLabels[d.stage]||d.stage;el('message').textContent=d.message;updateTimeline(d);updateCountdown(d);
+el('intent').disabled=!d.accepting_intent||d.mode!=='ai';el('intent-form').querySelector('button').disabled=!d.accepting_intent||d.mode!=='ai';el('intent-status').textContent=d.mode==='ai'?(d.accepting_intent?'Editable until measurement ends.':'Goal locked.'):'Offline mode uses a fixed goal.';
+const last=d.samples.at(-1);if(last){el('latency').textContent=last.error?'Request failed':fmt(last.ms);const priority=weightText(last);el('priority').textContent=priority[0];el('weights').textContent=priority[1]}if(!trying)el('try-app').disabled=!d.app_available;
+const progressing=anyBackgroundProgress(d);el('background').textContent=progressing?'Still progressing':d.status==='failed'?'Check run':'Starting';el('background').className='value '+(progressing?'good':'');el('background-check').className='check '+(progressing?'verified':'');
+const before=d.summary.Baseline;updateSummary(d.summary,d.status);
+const delta=d.latency_reduction_percent;el('change').textContent=delta==null?'Awaiting comparison':Math.abs(delta).toFixed(1)+'% '+(delta>=0?'less waiting':'more waiting');el('change').className='value '+(delta==null?'':delta>=0?'good':'bad');
+el('bounded-check').className='check '+(d.applied?'verified':'');el('bounded-check').textContent=d.applied?'Temporary boost applied':'Temporary boost';el('restore-check').className='check '+(d.restored?'verified':'');el('recovery').textContent=d.restored?'Back to normal':d.status==='failed'?'Recovery needs attention':'Restoration pending';
+el('results').replaceChildren();for(const name of ['Baseline','Prioritized','Restored']){const s=d.summary[name],row=document.createElement('tr');for(const value of [resultLabels[name],s?.cpu_weights?.map(w=>w.join(' / ')).join(', ')||'N/A',s?fmt(s.mean_ms):'Waiting',s?fmt(s.p95_ms):'Waiting',s?s.successes+' / '+s.errors:'0 / 0',s?.background_batches_per_second==null?'N/A':s.background_batches_per_second.toFixed(1),s?.measurement_seconds==null?'N/A':s.measurement_seconds.toFixed(1)+' s']){const cell=document.createElement('td');cell.textContent=value;row.appendChild(cell)}el('results').appendChild(row)}draw(d.samples,before?.mean_ms);
+const events=d.events.map(e=>{const v=e.evaluation||{},action=v.execution;return e.event==='cycle'?'Safety check '+e.cycle+': '+(action?action.status+' \u2014 '+action.reason:v.decision?.reason||'No action'):e.event==='finished'?'Finished: '+(e.status||e.result?.status||'inspect saved monitor history'):e.event==='agent'?'AI translated the request into a structured objective':e.event||'Controller event'});el('events').textContent=[...d.errors.map(e=>'ERROR: '+e),...events].join('\n')||'No controller events yet.';}catch(error){el('status').textContent='DISCONNECTED';el('message').textContent='The demo server stopped or is unreachable. Last measured results remain displayed; start a fresh run to reconnect.'}}
 setInterval(update,1000);update();
-</script></body></html>
+</script>
+</body>
+</html>

@@ -9,6 +9,7 @@ from senos.agents.cpu import CPUAgent
 from senos.agents.live import collect_live_context
 from senos.contracts import Observation
 from senos.telemetry.linux import CPUWeightReading
+from senos.storage.persistence import PolicyStore
 from senos.workloads.registry import Registry
 from senos.workloads.systemd import UnitInfo
 
@@ -166,7 +167,6 @@ def test_intent_pipeline_cli_preserves_identity_and_never_writes(setup, monkeypa
 
     database, telemetry = setup
     telemetry.pressure = pressure
-    before = database.read_bytes()
     original = IntentService.prioritize
     captured = []
 
@@ -202,7 +202,7 @@ def test_intent_pipeline_cli_preserves_identity_and_never_writes(setup, monkeypa
         assert proposal["intent_id"] == str(captured[0].intent_id)
         assert proposal["workload_id"] == str(captured[0].target_workload_id)
         assert datetime.fromisoformat(proposal["expires_at"].replace("Z", "+00:00")) == NOW + timedelta(seconds=600)
-    assert database.read_bytes() == before
+    assert PolicyStore(database).get_intent(captured[0].intent_id).model_dump(mode="json") == captured[0].model_dump(mode="json")
 
 
 @pytest.mark.parametrize("name", ["web", "build"])

@@ -5,6 +5,7 @@ import errno
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import http.client
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -33,6 +34,7 @@ class DemoState:
         self.phases = {}
         self.status = 'starting'
         self.stage = 'Starting'
+        self.step = 1
         self.message = 'Checking Linux and preparing owned demo workloads.'
         self.mode = mode
         self.errors = []
@@ -42,6 +44,10 @@ class DemoState:
         self.controller_exit = None
         self.game = False
         self.game_port = None
+        self.intent_text = 'Keep local-app responsive for one minute while background-build keeps progressing'
+        self.accepting_intent = True
+        self.app_port = None
+        self.stage_deadline = None
 
     def update(self, **values):
         with self.lock:
@@ -54,6 +60,32 @@ class DemoState:
             self.message = message
             self.status = 'failed'
         print('ERROR: ' + message, flush=True)
+
+    def set_intent(self, text):
+        text = text.strip()
+        if not text or len(text) > 500:
+            return False, 'Enter an intent between 1 and 500 characters.'
+        with self.lock:
+            if self.mode != 'ai':
+                return False, 'Custom intents require AI mode; deterministic mode uses the fixed rehearsal objective.'
+            if not self.accepting_intent:
+                return False, 'The agent has already started evaluating this run.'
+            self.intent_text = text
+        return True, 'Intent saved. The agent will evaluate it after the baseline measurement.'
+
+    def try_app(self):
+        with self.lock:
+            port = self.app_port
+        if port is None:
+            return 409, {'ok': False, 'message': 'The local app is not ready. Try again when the demo is running.'}
+        milliseconds, error = measure_workload_request(port)
+        if error is not None:
+            return 503, {'ok': False, 'message': f'The local app request failed: {error}'}
+        return 200, {
+            'ok': True,
+            'milliseconds': milliseconds,
+            'message': 'The local app responded. This personal try is not included in the measured comparison.',
+        }
 
     def add_sample(self, sample):
         with self.lock:
@@ -78,7 +110,7 @@ class DemoState:
                 advanced = items[-1]['batches'] - items[0]['batches']
                 summary[phase] = dict(successes=len(successes), errors=len(items)-len(successes),
                     mean_ms=statistics.mean(successes) if successes else None,
-                    p95_ms=ordered[max(0, __import__('math').ceil(len(ordered)*.95)-1)] if ordered else None,
+                    p95_ms=ordered[max(0, math.ceil(len(ordered)*.95)-1)] if ordered else None,
                     background_batches=max(0, advanced), measurement_seconds=elapsed if elapsed > 0 else None,
                     background_batches_per_second=advanced/elapsed if elapsed > 0 and advanced >= 0 else None,
                     cpu_weights=[list(pair) for pair in sorted({(item['web'], item['background']) for item in items})])
@@ -96,19 +128,29 @@ class DemoState:
             fps_change = (fps_after/fps_before-1)*100 if fps_before and fps_after and self.status != 'failed' else None
             if self.game:
                 reduction = None  # Incidental HTTP probes do not measure game frame latency.
+            stage_remaining = (
+                max(0, math.ceil(self.stage_deadline-time.monotonic()))
+                if self.stage_deadline is not None else None
+            )
             return dict(game_fps_change_percent=fps_change, game=self.game, status=self.status, stage=self.stage, message=self.message, mode=self.mode,
+                step=self.step,
                 samples=list(self.samples), summary=summary, errors=list(self.errors), events=list(self.events),
                 applied=self.applied, restored=self.restored, controller_exit=self.controller_exit,
+                intent_text=self.intent_text, accepting_intent=self.accepting_intent,
+                app_available=self.app_port is not None, stage_seconds_remaining=stage_remaining,
                 latency_reduction_percent=reduction)
 
 
-def controller_arguments(mode, run, game=False):
-    target = 'demo-game' if game else 'demo-web'
+def controller_arguments(mode, run, intent_text=None, *, game=False):
+    target = 'demo-game' if game else 'local-app'
+    background = 'demo-build' if game else 'background-build'
+    default_intent = (f'Prioritize {target} for one minute while keeping {background} progressing' if game else
+        'Keep local-app responsive for one minute while background-build keeps progressing')
     cli = [sys.executable, '-c', 'from senos.cli import app; app()']
     if mode == 'ai':
-        cli += ['agent', 'run', f'Prioritize {target} for one minute while keeping demo-build progressing', '--watch']
+        cli += ['agent', 'run', intent_text or default_intent, '--watch']
     else:
-        cli += ['monitor', 'start', target, '--duration-seconds', '60', '--preserve', 'demo-build']
+        cli += ['monitor', 'start', target, '--duration-seconds', '60', '--preserve', background]
     return cli + ['--apply', '--json', '--db', str(run/'registry.sqlite3'), '--monitor-db', str(run/'monitor.sqlite3')]
 
 
@@ -154,6 +196,40 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass  # A closed browser tab is not a workload failure.
 
+    def do_POST(self):
+        if self.path == '/try-app':
+            status, payload = self.server.demo.try_app()
+            body = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path != '/intent':
+            self.send_error(404, 'Use /intent to submit an objective or /try-app to try the local app')
+            return
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if length > 4096:
+                raise ValueError('Request is too large')
+            payload = json.loads(self.rfile.read(length))
+            text = payload.get('intent') if isinstance(payload, dict) else None
+            if not isinstance(text, str):
+                raise ValueError('Intent must be text')
+            accepted, message = self.server.demo.set_intent(text)
+            body = json.dumps({'accepted': accepted, 'message': message}).encode()
+            self.send_response(200 if accepted else 409)
+        except (ValueError, json.JSONDecodeError) as error:
+            body = json.dumps({'accepted': False, 'message': str(error)}).encode()
+            self.send_response(400)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, *args):
         pass
 
@@ -191,8 +267,41 @@ def ready_state(path, unit):
     raise RuntimeError(f'Demo workload did not publish readiness within 15 seconds: {unit}')
 
 
+def measure_workload_request(port):
+    start = time.monotonic()
+    connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+    try:
+        connection.request('GET', '/work')
+        response = connection.getresponse()
+        body = response.read()
+        if response.status != 200 or body != b'ok\n':
+            raise RuntimeError('HTTP workload returned an unexpected response')
+        return (time.monotonic()-start)*1000, None
+    except (OSError, http.client.HTTPException, RuntimeError) as failure:
+        return None, type(failure).__name__
+    finally:
+        connection.close()
+
+
 def weights(units):
-    return [int(command(['systemctl', '--user', 'show', unit, '-p', 'CPUWeight', '--value']).stdout.strip()) for unit in units]
+    values = []
+    for unit in units:
+        control_group = command(
+            ['systemctl', '--user', 'show', unit, '-p', 'ControlGroup', '--value']
+        ).stdout.strip()
+        if not control_group:
+            values.append(None)
+            continue
+        cgroup = (Path('/sys/fs/cgroup') / control_group.lstrip('/')).resolve()
+        if not cgroup.is_relative_to(Path('/sys/fs/cgroup')) or cgroup == Path('/sys/fs/cgroup'):
+            values.append(None)
+            continue
+        try:
+            raw = (cgroup / 'cpu.weight').read_text().strip()
+            values.append(int(raw) if raw.isdecimal() and 1 <= int(raw) <= 10000 else None)
+        except (OSError, ValueError):
+            values.append(None)
+    return values
 
 
 def recovery_verified(run):
@@ -235,16 +344,19 @@ def experiment(state, run, cpu, mode, stop, done, game=False):
             (run/'configuration.json').write_text(json.dumps(config, indent=2)+'\n')
         background = services.start('background', run/'background.json', 20000)
         ready_state(run/'background.json', background)
+        state.update(app_port=port)
         units = [web, background]
         (run/'units.json').write_text(json.dumps(units))
         registry = Registry(run/'registry.sqlite3')
-        registry.register('demo-game' if game else 'demo-web', web)
-        registry.register('demo-build', background)
-        state.update(status='running', stage='Warmup', message='Warming up CPU pressure for 10 seconds; then measuring 15 seconds of baseline.')
+        registry.register('demo-game' if game else 'local-app', web)
+        registry.register('demo-build' if game else 'background-build', background)
+        state.update(status='running', stage='Warmup', step=1, stage_deadline=time.monotonic()+10,
+            message='Starting the local app and background build on one contended CPU.')
         if stop.wait(10):
             return
-        state.update(stage='Baseline', message='Measuring 15 seconds at equal 100 / 100 weights. Background work continues.')
         baseline_start = time.monotonic()
+        state.update(stage='Baseline', step=2, stage_deadline=baseline_start+15,
+            message='Measuring how long the local app waits before SenOS helps. The background build continues.')
         controller_started = None
         restored_start = None
         boosted = False
@@ -261,13 +373,16 @@ def experiment(state, run, cpu, mode, stop, done, game=False):
             while not stop.is_set():
                 now = time.monotonic()
                 if controller is None and now-baseline_start >= 15:
-                    state.update(stage='Resolving intent' if mode == 'ai' else 'Evaluating',
-                        message='AI resolves the objective once; deterministic checks authorize any CPU change.' if mode == 'ai' else 'Offline deterministic mode: no LLM or API call.')
-                    controller = subprocess.Popen(controller_arguments(mode, run, game=game), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
+                    state.update(accepting_intent=False)
+                    state.update(stage='Resolving intent' if mode == 'ai' else 'Evaluating', step=3, stage_deadline=None,
+                        message='SenOS is understanding your request; deterministic safety checks authorize any CPU change.' if mode == 'ai' else 'SenOS is evaluating the fixed offline objective with deterministic safety checks.')
+                    controller = subprocess.Popen(controller_arguments(mode, run, state.intent_text, game=game), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
                     controller_started = now
                 if controller is not None and controller.poll() is None and now-controller_started > 180:
                     raise RuntimeError('Controller exceeded 180 seconds; interrupting it and checking recovery')
                 current = weights(units)
+                if any(weight is None for weight in current):
+                    raise RuntimeError('CPUWeight is unavailable for a live demo workload')
                 if controller is not None and controller.poll() is not None:
                     if restored_start is None:
                         # Recheck the durable execution records as well as actual live settings.
@@ -278,29 +393,15 @@ def experiment(state, run, cpu, mode, stop, done, game=False):
                         if not restored:
                             raise RuntimeError('Restoration could not be verified; pending recovery needs review')
                         restored_start = now
-                        state.update(stage='Restored' if boosted else 'No action',
-                            message='Original 100 / 100 weights verified. Measuring 10 seconds after restoration.' if boosted else 'No verified boost occurred. Inspect controller events; this run does not demonstrate improvement.')
+                        state.update(stage='Restored' if boosted else 'No action', step=5, stage_deadline=now+10,
+                            message='Back to normal: SenOS verified the original priorities. Measuring for 10 more seconds.' if boosted else 'SenOS made no verified change. This run does not claim an improvement.')
                     if now-restored_start >= 10:
                         break
                 phase = ('Restored' if restored_start is not None and boosted else
                     'Prioritized' if current[0] > 100 else 'Resolving' if controller is not None else 'Baseline')
                 if current[1] != 100 or current[0] not in (100, 200):
                     raise RuntimeError('Unexpected CPU settings; refusing to label measurements as valid')
-                start = time.monotonic()
-                error = None
-                ms = None
-                connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
-                try:
-                    connection.request('GET', '/work')
-                    response = connection.getresponse()
-                    body = response.read()
-                    if response.status != 200 or body != b'ok\n':
-                        raise RuntimeError('HTTP workload returned an unexpected response')
-                    ms = (time.monotonic()-start)*1000
-                except (OSError, http.client.HTTPException, RuntimeError) as failure:
-                    error = type(failure).__name__
-                finally:
-                    connection.close()
+                ms, error = measure_workload_request(port)
                 after = weights(units)
                 # A policy transition during a request is shown but excluded from phase comparisons.
                 if after != current:
@@ -324,8 +425,10 @@ def experiment(state, run, cpu, mode, stop, done, game=False):
                 samples_file.write(json.dumps(sample)+'\n')
                 samples_file.flush()
                 boosted = boosted or phase == 'Prioritized'
-                if phase in ('Baseline', 'Prioritized'):
+                if phase == 'Baseline':
                     state.update(stage=phase)
+                elif phase == 'Prioritized':
+                    state.update(stage=phase, step=4)
                 # Only closed CLI JSON events are included; no environment or provider secrets are read.
                 events = []
                 for line in (run/'agent.log').read_text().splitlines():
@@ -346,12 +449,13 @@ def experiment(state, run, cpu, mode, stop, done, game=False):
             state.update(status='stopped', message='Stopped by the user; recovery and workload cleanup were checked.')
         try:
             stop_controller(controller)
-            if units and (run/'registry.sqlite3').exists():
+            if controller is not None and units and (run/'registry.sqlite3').exists():
                 # Independent recovery handles abnormal controller termination. Allow its polling interval.
                 until = time.monotonic()+12
                 while not recovery_verified(run) and time.monotonic() < until:
                     time.sleep(1)
-                restored = weights(units) == [100, 100] and recovery_verified(run)
+                live_weights = weights(units)
+                restored = live_weights in ([100, 100], [None, None]) and recovery_verified(run)
                 state.update(restored=restored)
                 if not restored:
                     state.error('CPU restoration not verified before workload shutdown; inspect registry recovery records.')
@@ -359,9 +463,11 @@ def experiment(state, run, cpu, mode, stop, done, game=False):
             state.error(f'Recovery check failed: {type(error).__name__}: {error}')
         finally:
             errors = services.cleanup()
+            state.update(app_port=None)
             for error in errors:
                 state.error(error)
-            state.update(stage='Finished', message=state.message if state.status in ('failed', 'no_action', 'stopped') else 'Completed: original settings verified, demo services stopped. Results are saved below.')
+            state.update(stage='Finished', stage_deadline=None,
+                message=state.message if state.status in ('failed', 'no_action', 'stopped') else 'Completed: original settings verified, demo services stopped. Results are saved below.')
             try:
                 (run/'summary.json').write_text(json.dumps(state.snapshot(), indent=2)+'\n')
             except OSError as error:
@@ -410,6 +516,8 @@ def main():
         with bind_server(args.port) as server:
             state = DemoState(args.mode)
             state.update(game=args.game)
+            if args.game:
+                state.update(intent_text='Prioritize demo-game for one minute while keeping demo-build progressing')
             server.demo = state
             server.timeout = .5
             run = Path(tempfile.mkdtemp(prefix='run-', dir=STATE_ROOT))

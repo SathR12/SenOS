@@ -55,11 +55,13 @@ intent, and expiration. CPU weights use systemd's cgroup-v2 range of 1 through
 
 `ActionResult` records what actually happened after the executor received a
 proposal. Its status is `applied`, `rejected`, or `failed`, and its reason is
-always recorded. An applied result must include the previous value and the
-verified effective value. A rejected result may record the value it observed,
+always recorded. An applied result must include the verified effective value
+and may record an explicitly unset previous value. A rejected result may record the value it observed,
 but it cannot claim an effective changed value. Failed results may include values
-when the executor learned them, allowing
-recovery code to represent partial or uncertain failures without inventing data.
+when the executor learned them, allowing recovery code to represent partial or
+uncertain failures without inventing data. `previous_cpu_weight` may be
+`None` for an explicitly unset configured value; the durable recovery record
+still distinguishes that from missing evidence.
 
 ## Numeric inputs and compatibility
 
@@ -72,3 +74,13 @@ columns to the shared contract. `manager` defaults to `user` for older standalon
 Workload payloads; records from the registry always supply their explicit
 manager. Consumers of Observation must handle `None` instead of assuming every
 sample contains numeric metrics.
+
+## Persistence
+
+Validated intents are stored before policy evaluation with state `validated`.
+Their UUID, submission timestamp, duration, source text, and ordered preserved
+workload IDs are immutable audit data; unregistering a workload does not remove
+that history. Live CPU evaluation stores an immutable execution snapshot that
+links each observation to its intent and records the CPU weight, invocation, and
+cgroup identity used for the decision. Proposals, explicit `no_action`
+decisions, validation decisions, and action results are append-only records.

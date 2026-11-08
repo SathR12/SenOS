@@ -170,6 +170,14 @@ class Services:
     def stop(self, unit: str) -> None:
         if unit not in self.owned:
             raise ValueError("Refusing to stop a service not owned by this run")
+        state = command(
+            ["systemctl", "--user", "show", unit, "-p", "LoadState", "--value"],
+            check=False,
+        )
+        loaded = state.stdout.strip() if state is not None else "loaded"
+        if loaded in {"", "not-found"}:
+            self.owned.remove(unit)
+            return
         command(["systemctl", "--user", "stop", "--", unit])
         self.owned.remove(unit)
 

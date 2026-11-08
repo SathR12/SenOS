@@ -55,7 +55,7 @@ The heuristic is a starting baseline, not proof that user-visible latency will i
 
 The collector gathers three observation rounds, with spacing sufficient for the policy's observation window. It reads actual cgroup `cpu.weight` before and after collection. A configured systemd CPUWeight can be unset while the effective kernel weight is readable as 100; this measured value is used without inventing a baseline. Restore continues to preserve the original configured setting separately.
 
-If weights, invocation identity, or cgroup location change during collection, that workload's evidence is discarded. A changed registered inventory aborts the snapshot. Non-sibling workloads remain visible but cannot act as CPU-weight peers. Sampling is read-only and normally takes several seconds. Missing data or zero pressure should yield no_action, not force a proposal. Live mode currently has no persisted last-change history: cooldown persistence and the automatic control loop still belong to the future controller. There is no --apply option.
+If weights, invocation identity, or cgroup location change during collection, that workload's evidence is discarded. A changed registered inventory aborts the snapshot. Non-sibling workloads remain visible but cannot act as CPU-weight peers. Sampling is read-only and normally takes several seconds. Missing data or zero pressure should yield no_action, not force a proposal. Live proposals are persisted before validation. `--apply` is opt-in, rechecks the unit identity and expected weight, records recovery state before writing, and verifies the effective weight afterward. Expired durable actions are reconciled on the next live evaluation or restore command; there is not yet a continuously running controller daemon.
 
 For manual verification and a reproducible contention setup, see [live agent testing](live-agent-testing.md).
 
@@ -82,3 +82,38 @@ Run `uv run pytest`. The existing opt-in systemd tests exercise registration and
 ## Intent-driven dry run
 
 Use `senos intent prioritize NAME --duration-seconds 600 --preserve OTHER --evaluate` to resolve a structured objective and evaluate it against live telemetry in one command. The original Intent is preserved through the optional CPU Proposal. See [intent usage](intent.md) for JSON output and limitations. This path does not apply CPU settings or call an LLM.
+
+## Current heuristic thresholds
+
+The LLM supplies a registered target, preserved workload names, duration, and a
+rationale. It does not choose these thresholds or the CPU weight. The current
+CPU proposal rule uses experimental defaults in `CPUPolicy`:
+
+| Check | Comparison | Purpose |
+| --- | --- | --- |
+| Sustained CPU pressure | Target `some avg10` >= 5% in all three latest observations | Require evidence of waiting for CPU, not just high utilization |
+| Sample count and span | Three distinct observations spanning >= 2 seconds | Avoid deciding from a single reading |
+| Freshness | Each target observation no older than 10 seconds | Reject stale evidence |
+| Memory-pressure guard | Any available target `some avg10` >= 10% blocks a CPU-only proposal | Avoid assuming CPU contention is the only bottleneck |
+| Peer eligibility | At least one active, CPU-using registered peer in the comparable scheduling group | Require a managed competitor |
+| Proposal | `min(1000, int(current_weight * 2))` | Make a bounded relative-priority increase |
+| Execution ceiling | At most `min(1000, original_weight * 2)` | Prevent repeated boosts from compounding |
+| Real-change cooldown | At least 30 seconds after a real change within the session | Limit repeated writes |
+
+The target must be active with positive measured CPU use. The intent must remain
+valid; registered targets, preserved workloads, identities, bounds, and recovery
+readiness are independently checked. There is no CPU-utilization threshold such
+as "CPU > 80%". The memory check uses pressure, not the percentage of RAM occupied;
+a missing memory-pressure reading is not evidence that pressure is zero.
+
+For example, CPU PSI readings `6%, 8%, 7%` pass the pressure comparison, while
+`2%, 8%, 7%` do not. Passing this comparison alone does not authorize execution.
+With all other checks satisfied, weight 100 can be proposed as 200. The executor
+rejects a later 400 proposal when the original weight was 100.
+
+These parameters are initial engineering choices intended to reduce transient
+reactions and bound policy changes. They were not learned by Gemini, derived as
+optimal values from Linux, or selected through a completed parameter-sweep study.
+Three readings of a smoothed signal are a persistence check, not independent
+statistical trials. Future tuning should compare repeated responsiveness and
+background-throughput measurements against defaults and static policies.
