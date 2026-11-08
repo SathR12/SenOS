@@ -38,6 +38,10 @@ class ActionResult(ContractModel):
 
         if self.status is ActionStatus.APPLIED:
             if self.effective_cpu_weight is None:
+                if self.previous_cpu_weight is None:
+                    raise ValueError(
+                        "an applied result requires previous_cpu_weight and effective_cpu_weight"
+                    )
                 raise ValueError("an applied result requires effective_cpu_weight")
             if self.effective_cpu_weight != self.requested_cpu_weight:
                 raise ValueError(

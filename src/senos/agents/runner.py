@@ -31,6 +31,11 @@ def run_cpu(*, input_path: Path | None = None, target_name: str | None = None, d
     if store is not None:
         store.save_intent(context.intent)
         context = context.model_copy(update={"intent": store.get_intent(context.intent.intent_id)})
+        observations = tuple(
+            observation.model_copy(update={"intent_id": context.intent.intent_id})
+            for observation in context.observations
+        )
+        context = context.model_copy(update={"observations": observations})
         observed_ids = {observation.workload_id for observation in context.observations}
         store.save_snapshot(ExecutionSnapshot(
             intent_id=context.intent.intent_id,

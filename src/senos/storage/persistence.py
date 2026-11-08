@@ -205,7 +205,7 @@ class PolicyStore:
         try:
             with closing(self._connect()) as connection, connection:
                 connection.execute(
-                    """INSERT INTO proposals VALUES (?, ?, ?, 'proposed', ?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO proposals VALUES (?, ?, ?, 'proposed', ?, ?, ?, ?, ?)""",
                     (str(proposal.proposal_id), str(proposal.intent_id),
                      str(proposal.workload_id), proposal.expected_cpu_weight,
                      proposal.proposed_cpu_weight, proposal.rationale,
