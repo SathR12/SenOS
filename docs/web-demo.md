@@ -42,14 +42,16 @@ sleep is inserted into the workload.
 
 The dashboard leads with the familiar scenario of using a local app while a
 CPU-heavy background build continues. It shows a five-step timeline, countdowns,
-plain-language before/during results, background progress, and restoration checks.
+live color-coded response bars, a before/boost/restored bar comparison, background
+progress, and restoration checks. The live chart keeps one scale throughout the
+run and marks the baseline mean so changes are not exaggerated by downward rescaling.
 Use **Load app** to send your own real request to the contended app
 before and during the temporary boost. Personal preview clicks are displayed
 separately and are not recorded as formal samples. They still add real work, so
 repeated clicks can influence the run.
 
 Technical details remain available in expandable sections: actual CPU weights,
-latency history, controller decisions, and a table with each phase's mean, p95,
+controller decisions, and a table with each phase's mean, p95,
 successful/failed request counts, background batches/second, and measured counter
 span. Baseline and phase summaries survive chart scrolling. Transition requests
 and model-resolution requests are excluded from baseline/prioritized comparisons.

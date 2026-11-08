@@ -161,6 +161,9 @@ def test_http_dashboard_metrics_and_favicon_are_served_without_file_errors():
         assert b'id="results"' in dashboard
         assert b'Keep working while your build runs' in dashboard
         assert b'id="try-app"' in dashboard
+        assert b'id="bar-before"' in dashboard
+        assert b'id="bar-during"' in dashboard
+        assert b'id="bar-restored"' in dashboard
         assert json.load(urlopen(url+'/metrics'))['status'] == 'starting'
         assert urlopen(url+'/favicon.ico').status == 204
     finally:
