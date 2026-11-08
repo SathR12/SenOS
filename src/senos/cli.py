@@ -1,4 +1,4 @@
-"""CLI entry point. Registry status and explicit demo data; restore is pending.
+"""CLI entry point. Registry status with live Linux telemetry or explicit demo data; restore is pending.
 
 Keep this module limited to argument parsing and output so a future UI can
 reuse the same application services.
@@ -43,7 +43,7 @@ def status(
     db: Path | None = typer.Option(None, "--db", envvar="SENOS_REGISTRY_PATH", help="Override the per-user registry database path."),
     json_output: bool = typer.Option(False, "--json", help="Print a machine-readable status snapshot."),
 ) -> None:
-    """List saved workloads; metrics are unavailable until real telemetry exists."""
+    """List saved workloads with live CPU, memory, and pressure readings on Linux."""
     try:
         snapshot = get_status(db if db is not None else default_registry_path(), demo=demo)
     except StatusError as error:
@@ -52,7 +52,7 @@ def status(
     if json_output:
         typer.echo(json.dumps({
             "source": snapshot.source,
-            "live_telemetry": False,
+            "live_telemetry": snapshot.live,
             "workloads": [
                 {"workload": row.workload.model_dump(mode="json"), "observation": row.observation.model_dump(mode="json")}
                 for row in snapshot.rows
@@ -61,17 +61,20 @@ def status(
         return
     if demo:
         typer.echo("DEMO: synthetic workloads and readings; not your registered applications.")
+    elif snapshot.live:
+        typer.echo("Live readings from systemd and cgroup v2; CPU is averaged over a short sample. Unavailable readings are shown as N/A.")
     else:
-        typer.echo("Saved registrations only. Live telemetry is not implemented; unavailable readings are shown as N/A.")
+        typer.echo("Saved registrations only. Live telemetry requires Linux with systemd and cgroup v2; unavailable readings are shown as N/A.")
     if not snapshot.rows:
         typer.echo("No workloads registered." if not demo else "No demo workloads available.")
         return
-    typer.echo(f"{'NAME':<16} {'UNIT':<28} {'MANAGER':<8} {'STATE':<9} {'CPU %':>6} {'MEM MiB':>9}")
+    typer.echo(f"{'NAME':<16} {'UNIT':<28} {'MANAGER':<8} {'STATE':<9} {'CPU %':>6} {'MEM MiB':>9} {'CPU PSI':>8}")
     for row in snapshot.rows:
         workload, observation = row.workload, row.observation
         cpu = "N/A" if observation.cpu_usage_percent is None else f"{observation.cpu_usage_percent:.1f}"
-        memory = "N/A" if observation.memory_usage_bytes is None else f"{observation.memory_usage_bytes / 1024**2:.0f}"
-        typer.echo(f"{workload.name:<16} {workload.unit:<28} {workload.manager:<8} {observation.state.value:<9} {cpu:>6} {memory:>9}")
+        memory = "N/A" if observation.memory_usage_bytes is None else f"{observation.memory_usage_bytes / 1024**2:.1f}"
+        pressure = "N/A" if observation.cpu_pressure_some_avg10 is None else f"{observation.cpu_pressure_some_avg10:.1f}"
+        typer.echo(f"{workload.name:<16} {workload.unit:<28} {workload.manager:<8} {observation.state.value:<9} {cpu:>6} {memory:>9} {pressure:>8}")
 
 
 @app.command()

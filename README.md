@@ -14,7 +14,7 @@ SenOS runs in Linux user space and uses existing operating-system controls. It d
 
 ## Project status
 
-This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, and removal through `unregister`. `status` lists saved registrations and offers explicitly labeled demo readings with `--demo`; `restore` remains a placeholder. The shared contracts and registry adapter are implemented; see [contract semantics](docs/contracts.md). Agent behavior, telemetry, and resource control are not implemented.
+This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, and removal through `unregister`. `status` lists saved registrations with live, read-only CPU, memory, and pressure readings on Linux, and offers explicitly labeled demo readings with `--demo`; `restore` remains a placeholder. The shared contracts and registry adapter are implemented; see [contract semantics](docs/contracts.md). Agent behavior and resource control are not implemented.
 
 **We are building the CLI first.** A UI can follow once the controller, safety checks, and experiments work. Both interfaces should use the same application services and validated data contracts.
 
