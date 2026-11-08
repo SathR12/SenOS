@@ -247,3 +247,27 @@ def test_linux_without_cgroup_v2_has_no_default_live_collector(monkeypatch):
     monkeypatch.setattr(status_service.sys, "platform", "linux")
     monkeypatch.setattr(Path, "is_file", lambda self: False)
     assert status_service.default_telemetry() is None
+
+
+@pytest.mark.parametrize("raw,expected", [("100", 100), ("10000", 10000), ("0", None), ("10001", None), ("bad", None)])
+def test_effective_cpu_weight_is_read_from_kernel_file(tmp_path, raw, expected):
+    directory = make_cgroup(tmp_path)
+    (directory / "cpu.weight").write_text(raw)
+    live = telemetry(tmp_path, unit_reader(), Clock())
+    reading = live.read_cpu_weight(Workload(name="job", unit="job.service"))
+    assert reading.weight == expected
+    assert reading.invocation_id == "a" * 32
+
+
+def test_cpu_weight_read_drops_identity_change(tmp_path):
+    directory = make_cgroup(tmp_path)
+    (directory / "cpu.weight").write_text("100")
+    calls = []
+    def reader(unit, manager):
+        properties = unit_reader()(unit, manager)
+        if calls:
+            properties["InvocationID"] = "b" * 32
+        calls.append(1)
+        return properties
+    reading = telemetry(tmp_path, reader, Clock()).read_cpu_weight(Workload(name="job", unit="job.service"))
+    assert reading.weight is None

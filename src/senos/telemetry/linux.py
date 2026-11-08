@@ -29,6 +29,13 @@ class _Located:
     invocation_id: str | None = None
 
 
+@dataclass(frozen=True)
+class CPUWeightReading:
+    weight: int | None
+    invocation_id: str | None
+    cgroup_dir: Path | None
+
+
 def _read_text(path: Path) -> str | None:
     try:
         return path.read_text()
@@ -115,6 +122,17 @@ class LinuxTelemetry:
         if not directory.is_relative_to(self.cgroup_root) or directory == self.cgroup_root:
             return _Located(state, None)
         return _Located(state, directory, invocation)
+
+    def read_cpu_weight(self, workload: Workload) -> CPUWeightReading:
+        """Read the effective kernel weight; do not invent a default when unset."""
+        location = self._locate(workload)
+        weight = _read_int(location.cgroup_dir / "cpu.weight") if location.cgroup_dir else None
+        if weight is not None and not 1 <= weight <= 10000:
+            weight = None
+        verified = self._locate(workload)
+        if verified != location:
+            return CPUWeightReading(None, verified.invocation_id, verified.cgroup_dir)
+        return CPUWeightReading(weight, location.invocation_id, location.cgroup_dir)
 
     def observe_all(self, workloads: Iterable[Workload]) -> list[Observation]:
         """Sample all workloads with one sleep and per-counter elapsed times."""

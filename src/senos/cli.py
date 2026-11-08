@@ -30,21 +30,42 @@ app.add_typer(agent_app, name="agent")
 def cpu_agent(
     demo: bool = typer.Option(False, "--demo", help="Evaluate a synthetic CPU-contention scenario."),
     input_path: Path | None = typer.Option(None, "--input", help="Read a CPUContext JSON file instead of the demo."),
+    target: str | None = typer.Option(None, "--target", help="Collect live inputs for this registered workload name."),
+    preserve: list[str] = typer.Option([], "--preserve", help="Registered workload to preserve; repeat for multiple names (live mode)."),
+    duration: int = typer.Option(600, "--duration", min=1, max=86400, help="Intent duration in seconds (live mode)."),
+    db: Path | None = typer.Option(None, "--db", envvar="SENOS_REGISTRY_PATH", help="Registry database for live inputs."),
     json_output: bool = typer.Option(False, "--json", help="Print the full validated decision and proposal as JSON."),
 ) -> None:
     """Propose a bounded CPU-weight change; never execute it."""
     from senos.agents.runner import run_cpu
 
-    if (demo and input_path is not None) or (not demo and input_path is None):
-        raise typer.BadParameter("Choose exactly one of --demo or --input PATH")
+    if sum((demo, input_path is not None, target is not None)) != 1:
+        raise typer.BadParameter("Choose exactly one of --demo, --input PATH, or --target NAME")
+    if target is None and (preserve or duration != 600):
+        raise typer.BadParameter("--preserve and --duration require --target")
+    if target is not None and not json_output:
+        typer.echo("Reading live inputs (three rounds; usually a few seconds)...", err=True)
     try:
-        result = run_cpu(input_path=input_path)
+        result = run_cpu(input_path=input_path, target_name=target, database=db if db is not None else default_registry_path(), preserve_names=tuple(preserve), duration_seconds=duration)
     except (OSError, ValueError) as error:
         typer.echo(f"Invalid CPU context: {error}", err=True)
         raise typer.Exit(code=1) from error
     if json_output:
         typer.echo(json.dumps(result))
         return
+    if result["source"] == "live":
+        context = result["context"]
+        target_id = context["intent"]["target_workload_id"]
+        samples = [sample for sample in context["observations"] if sample["workload_id"] == target_id]
+        latest = samples[-1] if samples else {}
+        cpu = latest.get("cpu_usage_percent")
+        pressure = latest.get("cpu_pressure_some_avg10")
+        weight = context["current_cpu_weights"].get(target_id)
+        cpu_text = "N/A" if cpu is None else f"{cpu:.1f}%"
+        pressure_text = "N/A" if pressure is None else f"{pressure:.1f}%"
+        typer.echo(f"Live target={target}; samples={len(samples)}; weight={weight if weight is not None else 'N/A'}; CPU={cpu_text}; PSI={pressure_text}")
+        for warning in result["warnings"]:
+            typer.echo(f"Note: {warning}")
     decision = result["decision"]
     typer.echo(f"DRY RUN ({result['source']}): {decision['status']}: {decision['reason']}")
     if decision["proposal"] is not None:

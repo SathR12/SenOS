@@ -196,11 +196,12 @@ To set up a development environment, install [uv](https://docs.astral.sh/uv/) an
 ## CPU agent demo
 
 ```bash
+uv run senos agent cpu --target web --preserve build
 uv run senos agent cpu --demo
 uv run senos agent cpu --demo --json
 ```
 
-The agent evaluates synthetic inputs or a supplied JSON context and returns a bounded proposal without applying it. Live telemetry is available through status but is not automatically connected to the agent runner yet. See the [agent guide](docs/agents.md).
+The agent can collect live inputs for registered targets or evaluate synthetic/file inputs, then return a bounded proposal without applying it. See [manual live-agent tests](docs/live-agent-testing.md). See the [agent guide](docs/agents.md).
 
 ## Collaboration
 

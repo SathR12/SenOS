@@ -18,6 +18,7 @@ class CPUContext(ContractModel):
     observations: tuple[Observation, ...]
     current_cpu_weights: dict[UUID, CpuWeight | None]
     last_change_at: AwareDatetime | None = None
+    eligible_cpu_peer_ids: tuple[UUID, ...] | None = None
 
     @model_validator(mode="after")
     def unique_workloads(self):
@@ -110,12 +111,13 @@ class CPUAgent:
                 return no_action("A preserved workload lacks a fresh active observation")
         competing = [identifier for identifier, sample in latest.items()
             if identifier in workloads and identifier != target
+            and (context.eligible_cpu_peer_ids is None or identifier in context.eligible_cpu_peer_ids)
             and workloads[identifier].manager == workloads[target].manager
             and context.current_cpu_weights.get(identifier) is not None
             and fresh(sample) and sample.state is WorkloadState.ACTIVE
             and sample.cpu_usage_percent is not None and sample.cpu_usage_percent > 0]
         if not competing:
-            return no_action("No other active managed CPU consumer is observed in the same manager")
+            return no_action("No eligible active managed CPU peer is observed for the target scheduling group")
         proposed = min(policy.max_weight, int(current * policy.boost_factor))
         if proposed <= current:
             return no_action("No bounded CPU-weight increase is available")
