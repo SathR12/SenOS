@@ -1,6 +1,6 @@
 # Development
 
-This repository provides the folder and Python package skeleton, uv dependency configuration, and a CLI with persistent registration and status listing. Version, registration/unregistration, and registry-backed status commands work. `senos status --demo` provides clearly labeled synthetic samples on Linux, Windows, or macOS. Environment preflight, live telemetry, restore, and resource control are not implemented yet.
+This repository provides the folder and Python package skeleton, uv dependency configuration, and a CLI with persistent registration and status listing. Version, registration/unregistration, and registry-backed status commands work. `senos status --demo` provides clearly labeled synthetic samples on Linux, Windows, or macOS. Recorded CPU-weight restoration is implemented; see [restore usage](restore.md). Environment preflight, live telemetry, and automatic policy application are not implemented yet.
 
 Set up with:
 

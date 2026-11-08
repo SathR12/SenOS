@@ -51,6 +51,17 @@ class RegistryStore:
                 registered_at TEXT NOT NULL,
                 UNIQUE(unit, manager)
             )""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS cpu_restore_points (
+                workload_id TEXT PRIMARY KEY,
+                unit TEXT NOT NULL,
+                manager TEXT NOT NULL CHECK(manager IN ('user', 'system')),
+                original_weight INTEGER CHECK(original_weight BETWEEN 1 AND 10000),
+                invocation_id TEXT NOT NULL,
+                cgroup TEXT NOT NULL,
+                captured_at TEXT NOT NULL,
+                restored_at TEXT,
+                last_error TEXT
+            )""")
         except sqlite3.Error:
             connection.close()
             raise
@@ -97,6 +108,13 @@ class RegistryStore:
             raise RegistrationError(f"Workload {name!r} is not registered")
         try:
             with closing(self._connect()) as connection, connection:
+                connection.execute("BEGIN IMMEDIATE")
+                pending = connection.execute(
+                    """SELECT 1 FROM cpu_restore_points p JOIN registered_workloads w ON w.id = p.workload_id
+                       WHERE p.restored_at IS NULL AND (? IS NULL OR w.name = ?) LIMIT 1""", (name, name)
+                ).fetchone()
+                if pending:
+                    raise RegistrationError("Workload has pending changes; run senos restore before unregistering")
                 if name is None:
                     cursor = connection.execute("DELETE FROM registered_workloads")
                 else:

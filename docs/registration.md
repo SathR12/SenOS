@@ -54,7 +54,7 @@ Output is `{"removed": N}`. Both commands accept `--db PATH` and `SENOS_REGISTRY
 
 Unregistering only deletes registry rows. Applications continue running, and stopped/unavailable workloads can also be removed without contacting systemd. Re-registering after removal generates a new ID.
 
-`restore` remains a placeholder. It will eventually undo resource-policy changes while retaining registrations. Before enabling policy execution, unregister must be extended to reject targets with unrestored changes, including atomic rejection of clear-all if any selected workload has pending recovery. The current controller does not apply policies or track such changes, so that guard is not implemented yet.
+[Restore](restore.md) returns recorded CPU weights to their original settings while retaining registrations. Unregister now rejects workloads with pending CPU recovery. Clear-all checks all selected workloads before deleting any rows. Memory-policy recovery and automatic expiration are not implemented yet.
 
 ## Options and storage
 
@@ -67,7 +67,7 @@ Unregistering only deletes registry rows. Applications continue running, and sto
 - Targets must be loaded, active, and have a dedicated non-root cgroup. Arbitrary PIDs and ordinary shell-launched applications are outside this initial command's scope; launch test workloads through systemd first.
 - The default database lives outside the repository. If overriding it, keep runtime databases out of Git.
 
-The registry stores a small persistence record and exposes `RegisteredWorkload.to_workload()` to produce the [shared Workload contract](contracts.md), preserving identity, timestamp, and user/system manager. Registry and contract name/unit validation are shared. Registration JSON retains its existing `id` field. The registry supports unregister as described above; rename is not implemented. `status` lists registrations with unknown metrics until a collector exists; see [status usage](status.md). `restore` remains a placeholder.
+The registry stores a small persistence record and exposes `RegisteredWorkload.to_workload()` to produce the [shared Workload contract](contracts.md), preserving identity, timestamp, and user/system manager. Registry and contract name/unit validation are shared. Registration JSON retains its existing `id` field. The registry supports unregister as described above; rename is not implemented. `status` lists registrations with unknown metrics until a collector exists; see [status usage](status.md). `restore` supports recorded CPU settings; see [restore usage](restore.md).
 
 ## Verification
 
