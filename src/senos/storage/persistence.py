@@ -287,3 +287,32 @@ class PolicyStore:
                 )
         except (sqlite3.IntegrityError, sqlite3.Error) as error:
             raise PersistenceError("Recovery record already exists or cannot be stored") from error
+
+    def pending_recovery(self) -> list[dict]:
+        try:
+            with closing(self._connect()) as connection:
+                return [
+                    dict(row) for row in connection.execute(
+                        "SELECT * FROM recovery_records "
+                        "WHERE state IN ('pending_apply', 'applying', 'applied', "
+                        "'pending_restore', 'restore_failed') "
+                        "ORDER BY recorded_at, proposal_id"
+                    )
+                ]
+        except sqlite3.Error as error:
+            raise PersistenceError("Cannot read recovery records") from error
+
+    def set_recovery_state(self, proposal_id: UUID | str, state: str) -> None:
+        allowed = {"pending_apply", "applying", "applied", "pending_restore", "restored", "restore_failed", "intervention_required"}
+        if state not in allowed:
+            raise PersistenceError("Invalid recovery state")
+        try:
+            with closing(self._connect()) as connection, connection:
+                cursor = connection.execute(
+                    "UPDATE recovery_records SET state=? WHERE proposal_id=?",
+                    (state, str(proposal_id)),
+                )
+                if cursor.rowcount != 1:
+                    raise PersistenceError("Recovery record was not found")
+        except sqlite3.Error as error:
+            raise PersistenceError("Cannot update recovery state") from error

@@ -6,7 +6,7 @@ from typing import Protocol
 from senos.contracts import ActionResult, ActionStatus, Proposal, Workload
 from senos.policy.service import ValidationDecision
 from senos.recovery.errors import RestoreError
-from senos.storage.persistence import PolicyStore
+from senos.storage.persistence import PersistenceError, PolicyStore
 from .cpu import CPUState
 
 
@@ -80,7 +80,12 @@ class ProposalExecutor:
                 or verified.weight != proposal.proposed_cpu_weight
             ):
                 raise RuntimeError("CPU weight read-back did not match the requested value")
+            self.store.set_recovery_state(proposal.proposal_id, "applied")
         except (OSError, RestoreError, RuntimeError) as error:
+            try:
+                self.store.set_recovery_state(proposal.proposal_id, "pending_restore")
+            except PersistenceError as state_error:
+                error = RuntimeError(f"{error}; recovery state update failed: {state_error}")
             recovery_error = None
             try:
                 recovery_state = self.backend.read(workload)

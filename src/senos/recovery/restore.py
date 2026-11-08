@@ -1,6 +1,7 @@
 """Restore only CPUWeight values actually captured for registered workloads."""
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
@@ -8,6 +9,7 @@ from senos.contracts import Workload
 
 from senos.executor.cpu import CPUState, SystemdCPUBackend
 from senos.storage.changes import CPUJournal
+from senos.storage.persistence import PersistenceError, PolicyStore
 from senos.storage.registry import RegisteredWorkload, RegistryStore
 from senos.workloads.errors import RegistrationError
 from .errors import RestoreError
@@ -35,8 +37,10 @@ def _contract(record: RegisteredWorkload) -> Workload:
 
 class RestoreService:
     def __init__(self, database: Path, backend: CPUBackend | None = None):
+        self.database = database
         self.store = RegistryStore(database)
         self.journal = CPUJournal(database)
+        self.policy_store = PolicyStore(database)
         self.backend = backend if backend is not None else SystemdCPUBackend()
 
     def _workloads(self) -> list[RegisteredWorkload]:
@@ -103,4 +107,56 @@ class RestoreService:
                 results.append(RestoreOutcome(record.name, status, point["original_weight"], message or ("Would restore recorded CPUWeight" if dry_run else "Original CPUWeight verified")))
             except RestoreError as error:
                 results.append(RestoreOutcome(record.name, "failed", point["original_weight"], str(error)))
+        return results
+
+    def reconcile(self, *, now=None, dry_run: bool = False) -> list[RestoreOutcome]:
+        """Recover durable proposal actions after a crash or expiration."""
+        if not self.database.exists():
+            return []
+        now = now or datetime.now(timezone.utc)
+        try:
+            points = self.policy_store.pending_recovery()
+        except PersistenceError as error:
+            raise RestoreError(str(error)) from error
+        records = {item.id: item for item in self._workloads()}
+        results = []
+        for point in points:
+            record = records.get(point["workload_id"])
+            if record is None:
+                self.policy_store.set_recovery_state(point["proposal_id"], "intervention_required")
+                results.append(RestoreOutcome(point["workload_id"], "failed", point["previous_configured_weight"], "Workload is no longer registered"))
+                continue
+            workload = _contract(record)
+            try:
+                state = self.backend.read(workload)
+                if state.invocation_id != point["invocation_id"] or state.cgroup != point["cgroup_identity"]:
+                    self.policy_store.set_recovery_state(point["proposal_id"], "intervention_required")
+                    results.append(RestoreOutcome(record.name, "failed", point["previous_configured_weight"], "Unit identity changed; intervention required"))
+                    continue
+                expires = datetime.fromisoformat(point["expires_at"])
+                if point["state"] in {"pending_apply", "applying"}:
+                    if state.weight == point["current_effective_weight"]:
+                        self.policy_store.set_recovery_state(point["proposal_id"], "intervention_required")
+                        results.append(RestoreOutcome(record.name, "failed", point["previous_configured_weight"], "Action did not reach a verified applied state"))
+                        continue
+                    self.policy_store.set_recovery_state(point["proposal_id"], "pending_restore")
+                if point["state"] in {"applied", "pending_restore", "restore_failed"} and expires > now:
+                    continue
+                if dry_run:
+                    results.append(RestoreOutcome(record.name, "dry_run", point["previous_configured_weight"], "Would restore durable recovery state"))
+                    continue
+                self.policy_store.set_recovery_state(point["proposal_id"], "pending_restore")
+                self.backend.write(workload, point["previous_configured_weight"])
+                verified = self.backend.read(workload)
+                if verified.invocation_id != point["invocation_id"] or verified.cgroup != point["cgroup_identity"] or verified.weight != point["previous_configured_weight"]:
+                    raise RestoreError("Recovery read-back did not match the recorded previous setting")
+                self.policy_store.set_recovery_state(point["proposal_id"], "restored")
+                results.append(RestoreOutcome(record.name, "restored", point["previous_configured_weight"], "Durable recovery state verified"))
+            except (RestoreError, OSError, ValueError) as error:
+                try:
+                    self.policy_store.set_recovery_state(point["proposal_id"], "restore_failed")
+                except PersistenceError as state_error:
+                    results.append(RestoreOutcome(record.name, "failed", point["previous_configured_weight"], f"{error}; recovery state update failed: {state_error}"))
+                    continue
+                results.append(RestoreOutcome(record.name, "failed", point["previous_configured_weight"], str(error)))
         return results

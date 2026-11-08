@@ -39,6 +39,7 @@ def cpu_agent(
     duration: int = typer.Option(600, "--duration", min=1, max=86400, help="Intent duration in seconds (live mode)."),
     db: Path | None = typer.Option(None, "--db", envvar="SENOS_REGISTRY_PATH", help="Registry database for live inputs."),
     json_output: bool = typer.Option(False, "--json", help="Print the full validated decision and proposal as JSON."),
+    apply: bool = typer.Option(False, "--apply", help="Apply a validated live proposal; requires --target."),
 ) -> None:
     """Propose a bounded CPU-weight change; never execute it."""
     from senos.agents.runner import run_cpu
@@ -50,7 +51,7 @@ def cpu_agent(
     if target is not None and not json_output:
         typer.echo("Reading live inputs (three rounds; usually a few seconds)...", err=True)
     try:
-        result = run_cpu(input_path=input_path, target_name=target, database=db if db is not None else default_registry_path(), preserve_names=tuple(preserve), duration_seconds=duration)
+        result = run_cpu(input_path=input_path, target_name=target, database=db if db is not None else default_registry_path(), preserve_names=tuple(preserve), duration_seconds=duration, apply=apply)
     except (OSError, ValueError) as error:
         typer.echo(f"Invalid CPU context: {error}", err=True)
         raise typer.Exit(code=1) from error
@@ -75,6 +76,9 @@ def cpu_agent(
     if decision["proposal"] is not None:
         proposal = decision["proposal"]
         typer.echo(f"Would set CPUWeight {proposal['expected_cpu_weight']} -> {proposal['proposed_cpu_weight']} for {proposal['workload_id']}; expires {proposal['expires_at']}")
+    if result["action_result"] is not None:
+        action = result["action_result"]
+        typer.echo(f"Action result: {action['status']}: {action['reason']}")
 
 
 @app.callback()
@@ -223,7 +227,10 @@ def restore(
     if name is not None and all_workloads:
         raise typer.BadParameter("Provide a workload name or --all, not both")
     try:
-        results = RestoreService(db if db is not None else default_registry_path()).restore(name, dry_run=dry_run)
+        service = RestoreService(db if db is not None else default_registry_path())
+        reconciliation = service.reconcile(dry_run=dry_run)
+        results = service.restore(name, dry_run=dry_run)
+        results = reconciliation + results
     except RestoreError as error:
         typer.echo(f"senos restore: {error}", err=True)
         raise typer.Exit(code=1) from error
