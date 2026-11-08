@@ -102,3 +102,26 @@ def test_provider_factory_prefers_gemini_and_explicit_override(tmp_path, monkeyp
 def test_model_names_cannot_change_api_endpoint(client, monkeypatch):
     with pytest.raises(provider.AgentError, match="without URL paths"):
         gemini.GeminiProvider(model="../evil?key=anything")
+
+
+def test_transient_transport_failure_is_retried_once(client, monkeypatch):
+    calls = []
+    def send(request):
+        calls.append(request)
+        if len(calls) == 1:
+            raise TimeoutError("private connection details")
+        return io.BytesIO(json.dumps(native()).encode())
+    monkeypatch.setattr(gemini, "send_request", send)
+    assert client.respond([], [], "rules")["status"] == "completed"
+    assert len(calls) == 2
+
+
+def test_transport_retry_is_bounded_and_sanitized(client, monkeypatch):
+    calls = []
+    def send(request):
+        calls.append(request)
+        raise TimeoutError("private connection details")
+    monkeypatch.setattr(gemini, "send_request", send)
+    with pytest.raises(provider.AgentError, match="Cannot reach Gemini"):
+        client.respond([], [], "rules")
+    assert len(calls) == 2

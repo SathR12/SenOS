@@ -67,3 +67,17 @@ def test_credentials_and_model_are_environment_configured(monkeypatch):
 
 def test_redirects_are_disabled():
     assert provider.NoRedirect().redirect_request(None, None, 302, "moved", {}, "https://example.com") is None
+
+
+def test_transport_allows_sixty_seconds_without_following_redirects(monkeypatch):
+    captured = {}
+    class Opener:
+        def open(self, request, timeout):
+            captured["timeout"] = timeout
+            return "response"
+    def build(handler):
+        assert isinstance(handler, provider.NoRedirect)
+        return Opener()
+    monkeypatch.setattr(provider, "build_opener", build)
+    assert provider.send_request(object()) == "response"
+    assert captured["timeout"] == 60

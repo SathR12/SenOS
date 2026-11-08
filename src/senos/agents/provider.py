@@ -25,7 +25,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 def send_request(request):
     # Keep Authorization on the fixed API endpoint; never follow a redirect.
-    return build_opener(NoRedirect()).open(request, timeout=30)
+    return build_opener(NoRedirect()).open(request, timeout=60)
 
 
 class OpenAIProvider:

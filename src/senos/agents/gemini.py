@@ -62,8 +62,18 @@ class GeminiProvider:
         request = Request(f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
             data=json.dumps(payload).encode(), headers={"Content-Type": "application/json", "x-goog-api-key": self._key}, method="POST")
         try:
-            with send_request(request) as response:
-                raw = response.read(1_000_001)
+            # Model calls have no resource side effects. Retry a transient transport
+            # failure once; the executor still checks the original deadline.
+            for attempt in range(2):
+                try:
+                    with send_request(request) as response:
+                        raw = response.read(1_000_001)
+                    break
+                except HTTPError:
+                    raise
+                except (URLError, OSError, TimeoutError):
+                    if attempt:
+                        raise
             if len(raw) > 1_000_000:
                 raise AgentError("Gemini response exceeded the supported size")
             result = json.loads(raw)

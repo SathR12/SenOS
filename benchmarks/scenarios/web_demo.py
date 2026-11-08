@@ -141,6 +141,22 @@ class DemoState:
                 latency_reduction_percent=reduction)
 
 
+def controller_failure(path):
+    """Show only sanitized CLI errors, never arbitrary log contents or traces."""
+    allowed = ("senos agent:", "senos monitor:")
+    try:
+        with path.open('rb') as stream:
+            stream.seek(0, 2)
+            stream.seek(max(0, stream.tell() - 8192))
+            lines = stream.read(8192).decode('utf-8', errors='replace').splitlines()
+        for line in reversed(lines):
+            if line.startswith(allowed):
+                return line[:500]
+    except OSError:
+        pass
+    return 'see agent.log in the printed run directory'
+
+
 def controller_arguments(mode, run, intent_text=None, *, game=False, adaptive=False):
     target = 'demo-game' if game else 'local-app'
     background = 'demo-build' if game else 'background-build'
@@ -391,7 +407,8 @@ def experiment(state, run, cpu, mode, stop, done, game=False):
                         restored = current == [100, 100] and recovery_verified(run)
                         state.controller_finished(controller.returncode, applied=boosted, restored=restored)
                         if controller.returncode != 0:
-                            raise RuntimeError('Controller failed. Read agent.log in the printed run directory; no improvement is claimed.')
+                            detail = controller_failure(run/'agent.log')
+                            raise RuntimeError(f'Controller failed: {detail}. No improvement is claimed.')
                         if not restored:
                             raise RuntimeError('Restoration could not be verified; pending recovery needs review')
                         restored_start = now

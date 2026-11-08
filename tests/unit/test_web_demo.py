@@ -253,3 +253,11 @@ def test_adaptive_demo_explicitly_enables_bounded_periodic_reviews(tmp_path):
     assert args[args.index("--max-cycles") + 1] == "6"
     assert args[args.index("--interval") + 1] == "10"
     assert "--adaptive" not in demo.controller_arguments("deterministic", tmp_path, adaptive=True)
+
+
+def test_controller_failure_shows_provider_error_without_arbitrary_log_data(tmp_path):
+    path = tmp_path / "agent.log"
+    path.write_text('private arbitrary trace\nsenos agent: Cannot reach Gemini within the timeout; check connectivity and retry\n')
+    assert demo.controller_failure(path).startswith("senos agent: Cannot reach Gemini")
+    path.write_text("private arbitrary trace")
+    assert "private" not in demo.controller_failure(path)
