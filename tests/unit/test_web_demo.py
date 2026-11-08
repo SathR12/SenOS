@@ -1,5 +1,7 @@
 ﻿import socket
 import sys
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -10,6 +12,7 @@ def test_cli_uses_current_python_instead_of_assuming_sibling_executable(tmp_path
     args = demo.controller_arguments('ai', tmp_path)
     assert args[:3] == [sys.executable, '-c', 'from senos.cli import app; app()']
     assert '--apply' in args and str(tmp_path/'registry.sqlite3') in args
+    assert any('local-app' in argument and 'background-build' in argument for argument in args)
 
 
 def test_busy_port_selects_available_port_without_starting_workloads():
@@ -47,17 +50,17 @@ def test_no_action_is_not_reported_as_a_success():
 
 def test_ai_intent_can_be_replaced_only_during_warmup():
     state = demo.DemoState('ai')
-    accepted, _ = state.set_intent('Prioritize demo-web for two minutes')
+    accepted, _ = state.set_intent('Prioritize local-app for two minutes')
     assert accepted
-    assert state.snapshot()['intent_text'] == 'Prioritize demo-web for two minutes'
+    assert state.snapshot()['intent_text'] == 'Prioritize local-app for two minutes'
     state.update(accepting_intent=False)
-    accepted, message = state.set_intent('Prioritize demo-build')
+    accepted, message = state.set_intent('Prioritize background-build')
     assert not accepted and 'already started' in message
 
 
 def test_deterministic_demo_rejects_custom_intents():
     state = demo.DemoState('deterministic')
-    accepted, message = state.set_intent('Prioritize demo-web')
+    accepted, message = state.set_intent('Prioritize local-app')
     assert not accepted and 'AI mode' in message
 
 
@@ -78,8 +81,31 @@ def test_weights_preserves_unset_cpu_weight(monkeypatch):
         def __init__(self, value):
             self.stdout = value
 
-    values = iter(('100\n', '[not set]\n'))
+    class FakePath:
+        def __init__(self, value):
+            self.value = value
+
+        def __truediv__(self, other):
+            return self
+
+        def lstrip(self, value):
+            return self.value
+
+        def resolve(self):
+            return self
+
+        def is_relative_to(self, other):
+            return True
+
+        def __eq__(self, other):
+            return False
+
+        def read_text(self):
+            return self.value
+
+    values = iter(('100\n', ''))
     monkeypatch.setattr(demo, 'command', lambda *args, **kwargs: Result(next(values)))
+    monkeypatch.setattr(demo, 'Path', lambda value: FakePath('100\n') if value == '/sys/fs/cgroup' else FakePath(value))
     assert demo.weights(('web.service', 'build.service')) == [100, None]
 
 
@@ -125,16 +151,57 @@ def test_startup_failure_is_saved_and_cleanup_still_runs(monkeypatch, tmp_path):
 def test_http_dashboard_metrics_and_favicon_are_served_without_file_errors():
     import json
     import threading
-    from urllib.request import urlopen
     server = demo.bind_server(0)
     server.demo = demo.DemoState('deterministic')
     worker = threading.Thread(target=server.serve_forever)
     worker.start()
     try:
         url = f'http://127.0.0.1:{server.server_port}'
-        assert b'id="results"' in urlopen(url).read()
+        dashboard = urlopen(url).read()
+        assert b'id="results"' in dashboard
+        assert b'Keep working while your build runs' in dashboard
+        assert b'id="try-app"' in dashboard
         assert json.load(urlopen(url+'/metrics'))['status'] == 'starting'
         assert urlopen(url+'/favicon.ico').status == 204
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
+
+
+def test_try_app_endpoint_uses_real_workload_measurement(monkeypatch):
+    import json
+    import threading
+    state = demo.DemoState('deterministic')
+    state.update(app_port=4321)
+    monkeypatch.setattr(demo, 'measure_workload_request', lambda port: (37.5, None))
+    server = demo.bind_server(0)
+    server.demo = state
+    worker = threading.Thread(target=server.serve_forever)
+    worker.start()
+    try:
+        request = Request(f'http://127.0.0.1:{server.server_port}/try-app', method='POST')
+        result = json.load(urlopen(request))
+        assert result['ok'] is True
+        assert result['milliseconds'] == 37.5
+        assert state.snapshot()['summary'] == {}
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
+
+
+def test_try_app_is_unavailable_before_workload_starts():
+    import threading
+    server = demo.bind_server(0)
+    server.demo = demo.DemoState('deterministic')
+    worker = threading.Thread(target=server.serve_forever)
+    worker.start()
+    try:
+        request = Request(f'http://127.0.0.1:{server.server_port}/try-app', method='POST')
+        with pytest.raises(HTTPError) as error:
+            urlopen(request)
+        assert error.value.code == 409
     finally:
         server.shutdown()
         server.server_close()

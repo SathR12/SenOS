@@ -26,8 +26,8 @@ bash /mnt/j/Code/Projects/SenOS/scripts/web-demo.sh
 2. Start two uniquely named synthetic services at CPUWeight=100 on one allowed CPU.
 3. Warm up pressure for 10 seconds and measure baseline HTTP latency for 15 seconds.
 4. Ask the configured model to evaluate the objective entered in the dashboard
-   (pre-filled with "Prioritize demo-web for one minute while keeping
-   demo-build progressing"). You can replace it during warmup; model resolution
+   (pre-filled with "Keep local-app responsive for one minute while
+   background-build keeps progressing"). You can replace it during warmup; model resolution
    takes additional time, shown separately.
 5. Monitor the validated objective locally. If pressure and safety checks pass,
    apply the bounded web boost from 100 to 200; background weight remains 100.
@@ -40,8 +40,18 @@ The page itself runs separately from the contended workload so the dashboard sta
 responsive. Every latency value comes from a real HTTP request; no artificial
 sleep is inserted into the workload.
 
-The dashboard shows live phase, actual CPU weights, latency history, and a table
-with each phase's mean, p95, successful/failed request counts, and background batches/second and the measured counter span. Baseline and phase summaries survive chart scrolling. Transition requests
+The dashboard leads with the familiar scenario of using a local app while a
+CPU-heavy background build continues. It shows a five-step timeline, countdowns,
+plain-language before/during results, background progress, and restoration checks.
+Use **Load app** to send your own real request to the contended app
+before and during the temporary boost. Personal preview clicks are displayed
+separately and are not recorded as formal samples. They still add real work, so
+repeated clicks can influence the run.
+
+Technical details remain available in expandable sections: actual CPU weights,
+latency history, controller decisions, and a table with each phase's mean, p95,
+successful/failed request counts, background batches/second, and measured counter
+span. Baseline and phase summaries survive chart scrolling. Transition requests
 and model-resolution requests are excluded from baseline/prioritized comparisons.
 A brief progress-file replacement gap on WSL is retried for at most one second;
 a persistent missing file is a visible failure, not a fabricated measurement.
@@ -76,8 +86,8 @@ manual registration step, or copied temporary database path.
 
 ## Enter a custom intent
 
-In AI mode, edit the **Agent intent** field in the dashboard and select **Use
-this intent** during warmup. The text is sent only to the local demo server,
+In AI mode, edit **Your goal** in the dashboard and select **Save goal** during
+warmup. The text is sent only to the local demo server,
 then passed as the natural-language request to `senos agent run`. The form
 accepts up to 500 characters and becomes locked when baseline measurement ends.
 Deterministic/offline mode intentionally keeps its fixed rehearsal objective.
