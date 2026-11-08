@@ -249,3 +249,56 @@ Choose an acceptable background slowdown before tuning and repeat experiments. H
 ## License
 
 See [LICENSE](LICENSE).
+
+## Quick commands and live demo
+
+Run these from the repository root inside WSL/Linux after the initial `uv sync`:
+
+```bash
+make help
+make demo          # AI: warmup, baseline, one-minute objective, verified restoration
+make demo-offline  # The same CPU experiment without an API call
+```
+
+Open the exact URL printed after `OPEN`. In another terminal:
+
+```bash
+make demo-status   # Live SenOS telemetry for the demo's separate registry
+make proof         # Independent systemctl, /proc and kernel cgroup readings
+make results       # Saved latency, background batches/second, errors and recovery
+make demo-stop     # Graceful stop; Ctrl+C in the launcher also works
+```
+
+The synthetic app does real CPU work: Linux runs real processes, the requester
+measures actual HTTP latency, and the restricted executor changes real CPU weights.
+`make proof` prints process IDs, workload command lines, kernel `cpu.weight`, and
+advancing `cpu.stat` counters. When applied, the web weight changes 100 -> 200 -> 100;
+the background weight stays 100. A policy change is not proof of a performance
+benefit: compare measured latency and background throughput as well.
+
+Background batch totals cover different-length phases. For example, 100 batches
+in 10 seconds is 10 batches/s, while 300 batches in 60 seconds is only 5 batches/s.
+The dashboard and `make results` show time-normalized batches/second and the
+measurement span. More accumulated batches alone does not mean faster progress.
+Results vary with host load; no-action decisions, errors, and regressions remain
+visible. See the [demo guide](docs/web-demo.md) and [benchmark](docs/experiments.md).
+
+For ordinary registered applications:
+
+```bash
+make status
+make register NAME=web UNIT=my-web.service
+make remove NAME=web
+make ask TEXT="Prioritize web for one minute"    # Dry-run AI advice
+make apply TEXT="Prioritize web for one minute"  # Explicit real CPU changes
+make prioritize NAME=web KEEP=build             # Direct CPU control, 60 seconds
+make restore NAME=web
+make cli ARGS="status --json"
+make test
+```
+
+`remove` leaves the application running. `restore` requires a workload name.
+Use `DURATION=120` with `prioritize` to change its duration, or add `DB=/path/to/registry.sqlite3`
+to ordinary commands for a custom registry. Demo helpers select their own registry
+automatically. These shortcuts use the existing project environment and delegate
+to the existing CLI and restricted executor. See [all shortcut details](docs/commands.md).

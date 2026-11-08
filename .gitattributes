@@ -1,0 +1,3 @@
+# Keep Linux launchers usable after checkout on Windows.
+scripts/*.sh text eol=lf
+Makefile text eol=lf
