@@ -101,5 +101,17 @@ def collect_live_context(
             eligible_peers.append(identifier)
         if not comparable:
             warnings.append(f"{workload.name}: excluded as a CPU-weight peer because manager or cgroup parent differs")
-    observations = tuple(sample for sample in observations if sample.workload_id not in unstable)
+    observations = tuple(
+        sample.model_copy(update={
+            "intent_id": intent.intent_id,
+            "cpu_weight": weights[sample.workload_id],
+            "invocation_id": after[sample.workload_id].invocation_id,
+            "cgroup_identity": (
+                str(after[sample.workload_id].cgroup_dir)
+                if after[sample.workload_id].cgroup_dir is not None else None
+            ),
+        })
+        for sample in observations
+        if sample.workload_id not in unstable
+    )
     return CPUContext(intent=intent, workloads=workloads, observations=observations, current_cpu_weights=weights, eligible_cpu_peer_ids=tuple(eligible_peers)), tuple(warnings)
