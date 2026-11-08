@@ -30,3 +30,9 @@ terminal-ai:
 	@bash scripts/run-python.sh scripts/demo/control.py ai
 terminal-apply:
 	@bash scripts/run-python.sh scripts/demo/control.py apply
+
+.PHONY: game game-ai
+game:
+	@bash scripts/web-demo.sh --game --mode deterministic
+game-ai:
+	@bash scripts/web-demo.sh --game --mode ai

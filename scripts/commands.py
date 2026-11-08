@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 STATE_ROOT = ROOT/'var'/'web-demo'
 
 HELP = '''SenOS shortcuts (inside WSL/Linux)
+  make game                         Autoplay game + background Python CPU job, no API
+  make game-ai                      Same game using a Gemini objective
   make demo                         AI web demo; real CPU changes on owned test services
   make demo-offline                 Same demo without API calls
   make demo-status                  Live SenOS telemetry for the latest demo
@@ -112,7 +114,7 @@ def proof(run):
         raise ValueError('Unexpected demo service identities; refusing to inspect arbitrary targets')
     print('Independent evidence from systemctl, /proc and cgroup v2 (not dashboard values).')
     print('Synthetic application, real Linux processes and real scheduler controls.\n')
-    for label, unit in zip(('WEB', 'BACKGROUND'), units):
+    for label, unit in zip(('INTERACTIVE', 'BACKGROUND'), units):
         arguments = ['systemctl', '--user', 'show', unit, '-p', 'Id', '-p', 'ActiveState', '-p', 'MainPID', '-p', 'ControlGroup', '-p', 'CPUWeight', '-p', 'CPUUsageNSec']
         result = native(arguments)
         print(label+': '+shlex.join(arguments))
@@ -132,6 +134,7 @@ def proof(run):
         if not directory.is_relative_to(Path('/sys/fs/cgroup')):
             raise ValueError('Unexpected cgroup path')
         print('Kernel cgroup:', directory)
+        print('All cgroup process IDs (including game engine children):', (directory/'cgroup.procs').read_text().strip().replace('\n', ', '))
         print('cpu.weight:', (directory/'cpu.weight').read_text().strip())
         first_time = time.monotonic()
         first = cpu_counter(directory)
@@ -152,12 +155,21 @@ def results(run):
         return
     data = read_json(path)
     print(f"Run: {run}\nMode: {data['mode']} | Status: {data['status']} | Applied: {data['applied']} | Restored: {data['restored']}")
-    print(f"{'PHASE':<15} {'MEAN ms':>10} {'p95 ms':>10} {'BG batches/s':>14} {'SPAN s':>9} {'ERRORS':>8}")
+    game = data.get('game', False)
+    if game:
+        print(f"{'PHASE':<15} {'FPS':>10} {'p95 FRAME ms':>14} {'LATE/FRAMES':>14} {'BG batches/s':>14}")
+    else:
+        print(f"{'PHASE':<15} {'MEAN ms':>10} {'p95 ms':>10} {'BG batches/s':>14} {'SPAN s':>9} {'ERRORS':>8}")
     def number(value):
         return 'N/A' if value is None else f'{value:.1f}'
     for phase in ('Baseline', 'Prioritized', 'Restored'):
         item = data['summary'].get(phase)
         if item:
+            if game:
+                frames = item.get('game', {})
+                count = str(frames.get('missed_deadlines', 0))+'/'+str(frames.get('frames', 0))
+                print(f"{phase:<15} {number(frames.get('fps')):>10} {number(frames.get('p95_frame_ms')):>14} {count:>14} {number(item.get('background_batches_per_second')):>14}")
+                continue
             print(f"{phase:<15} {number(item['mean_ms']):>10} {number(item['p95_ms']):>10} {number(item.get('background_batches_per_second')):>14} {number(item.get('measurement_seconds')):>9} {item['errors']:>8}")
     print('Compare background batches/second, not totals from unequal-length phases. Older runs may have N/A rates.')
     for error in data['errors']:

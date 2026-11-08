@@ -156,14 +156,14 @@ class Services:
         self.owned = set()
         self.launched = []
 
-    def start(self, mode: str, state: Path, iterations: int) -> str:
+    def start(self, mode: str, state: Path, iterations: int, *, workload: Path | None = None) -> str:
         unit = f"senos-bench-{uuid4().hex}.service"
         self.owned.add(unit)
         self.launched.append(unit)
         command(["systemd-run", "--user", "--unit", unit, "--collect",
             f"--property=RuntimeMaxSec={self.runtime}", "--property=CPUWeight=100",
             "--property=CPUAccounting=yes", "--property=MemoryAccounting=yes",
-            shutil.which("taskset"), "-c", str(self.cpu), sys.executable, str(WORKLOAD),
+            shutil.which("taskset"), "-c", str(self.cpu), sys.executable, str(workload if workload is not None else WORKLOAD),
             mode, "--state", str(state), "--iterations", str(iterations)])
         return unit
 

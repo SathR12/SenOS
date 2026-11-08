@@ -304,3 +304,5 @@ automatically. These shortcuts use the existing project environment and delegate
 to the existing CLI and restricted executor. See [all shortcut details](docs/commands.md).
 
 Wang's optional [terminal throughput demo](scripts/demo/README.md) is also available through `make terminal-app`, `make terminal-build`, `make terminal-ai`, and `make terminal-cleanup`. It uses scoped services and its own registry; the colored bar measures relative throughput, not CPU percentage.
+
+For a visible autoplay game with a competing Python computation, run `make game` (offline) or `make game-ai` (Gemini). It measures actual Python frame times, FPS, late frames, and background throughput while applying and restoring a one-minute CPU priority. See [game setup and measurement limits](docs/game-demo.md).

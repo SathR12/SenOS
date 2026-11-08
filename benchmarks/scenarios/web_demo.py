@@ -40,6 +40,8 @@ class DemoState:
         self.applied = False
         self.restored = False
         self.controller_exit = None
+        self.game = False
+        self.game_port = None
 
     def update(self, **values):
         with self.lock:
@@ -80,21 +82,33 @@ class DemoState:
                     background_batches=max(0, advanced), measurement_seconds=elapsed if elapsed > 0 else None,
                     background_batches_per_second=advanced/elapsed if elapsed > 0 and advanced >= 0 else None,
                     cpu_weights=[list(pair) for pair in sorted({(item['web'], item['background']) for item in items})])
+            for phase, items in self.phases.items():
+                frames = [frame for item in items for frame in item.get('game_frames', [])]
+                if frames:
+                    from benchmarks.workloads.game import frame_statistics
+                    summary[phase]['game'] = frame_statistics(frames)
             before = summary.get('Baseline', {}).get('mean_ms')
             after = summary.get('Prioritized', {}).get('mean_ms')
             reduction = (1-after/before)*100 if before and after is not None and self.status != 'failed' else None
-            return dict(status=self.status, stage=self.stage, message=self.message, mode=self.mode,
+            before_game = summary.get('Baseline', {}).get('game', {})
+            after_game = summary.get('Prioritized', {}).get('game', {})
+            fps_before, fps_after = before_game.get('fps'), after_game.get('fps')
+            fps_change = (fps_after/fps_before-1)*100 if fps_before and fps_after and self.status != 'failed' else None
+            if self.game:
+                reduction = None  # Incidental HTTP probes do not measure game frame latency.
+            return dict(game_fps_change_percent=fps_change, game=self.game, status=self.status, stage=self.stage, message=self.message, mode=self.mode,
                 samples=list(self.samples), summary=summary, errors=list(self.errors), events=list(self.events),
                 applied=self.applied, restored=self.restored, controller_exit=self.controller_exit,
                 latency_reduction_percent=reduction)
 
 
-def controller_arguments(mode, run):
+def controller_arguments(mode, run, game=False):
+    target = 'demo-game' if game else 'demo-web'
     cli = [sys.executable, '-c', 'from senos.cli import app; app()']
     if mode == 'ai':
-        cli += ['agent', 'run', 'Prioritize demo-web for one minute while keeping demo-build progressing', '--watch']
+        cli += ['agent', 'run', f'Prioritize {target} for one minute while keeping demo-build progressing', '--watch']
     else:
-        cli += ['monitor', 'start', 'demo-web', '--duration-seconds', '60', '--preserve', 'demo-build']
+        cli += ['monitor', 'start', target, '--duration-seconds', '60', '--preserve', 'demo-build']
     return cli + ['--apply', '--json', '--db', str(run/'registry.sqlite3'), '--monitor-db', str(run/'monitor.sqlite3')]
 
 
@@ -104,11 +118,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(204)
             self.end_headers()
             return
+        if self.path == '/game':
+            port = self.server.demo.game_port
+            if not self.server.demo.game or port is None:
+                self.send_error(503, 'Game is warming up')
+                return
+            connection = http.client.HTTPConnection('127.0.0.1', port, timeout=3)
+            try:
+                connection.request('GET', '/frame')
+                response = connection.getresponse()
+                body = response.read()
+                self.send_response(response.status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (OSError, http.client.HTTPException):
+                pass  # Closed tabs or a stopped owned game cannot alter CPU policy.
+            finally:
+                connection.close()
+            return
         if self.path not in ('/', '/metrics'):
             self.send_error(404, 'Use / for the dashboard or /metrics for JSON')
             return
         data = self.server.demo.snapshot()
-        body = (Path(__file__).with_suffix('.html').read_bytes() if self.path == '/' else json.dumps(data).encode())
+        body = ((Path(__file__).with_name('game_demo.html') if self.server.demo.game else Path(__file__).with_suffix('.html')).read_bytes() if self.path == '/' else json.dumps(data).encode())
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8' if self.path == '/' else 'application/json')
         self.send_header('Cache-Control', 'no-store')
@@ -184,19 +219,26 @@ def stop_controller(process):
             process.wait(timeout=5)
 
 
-def experiment(state, run, cpu, mode, stop, done):
+def experiment(state, run, cpu, mode, stop, done, game=False):
     services = Services(cpu, 300)
     controller = None
     units = []
     try:
-        web = services.start('web', run/'web.json', 400000)
-        port = ready_state(run/'web.json', web)['port']
+        web = (services.start('web', run/'web.json', 400000, workload=ROOT/'benchmarks/workloads/game.py')
+            if game else services.start('web', run/'web.json', 400000))
+        ready = ready_state(run/'web.json', web)
+        port = ready['port']
+        if game:
+            state.update(game_port=port)
+            config = read_json(run/'configuration.json')
+            config.update(game_calibrated_iterations=ready['iterations'], game_target_fps=ready['target_fps'], game_target_cpu_ms=28)
+            (run/'configuration.json').write_text(json.dumps(config, indent=2)+'\n')
         background = services.start('background', run/'background.json', 20000)
         ready_state(run/'background.json', background)
         units = [web, background]
         (run/'units.json').write_text(json.dumps(units))
         registry = Registry(run/'registry.sqlite3')
-        registry.register('demo-web', web)
+        registry.register('demo-game' if game else 'demo-web', web)
         registry.register('demo-build', background)
         state.update(status='running', stage='Warmup', message='Warming up CPU pressure for 10 seconds; then measuring 15 seconds of baseline.')
         if stop.wait(10):
@@ -206,13 +248,22 @@ def experiment(state, run, cpu, mode, stop, done):
         controller_started = None
         restored_start = None
         boosted = False
+        last_frame = 0
+        if game:
+            connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+            try:
+                connection.request('GET', '/frame')
+                response = connection.getresponse()
+                last_frame = json.loads(response.read())['sequence']
+            finally:
+                connection.close()
         with (run/'agent.log').open('w') as log, (run/'samples.jsonl').open('a') as samples_file:
             while not stop.is_set():
                 now = time.monotonic()
                 if controller is None and now-baseline_start >= 15:
                     state.update(stage='Resolving intent' if mode == 'ai' else 'Evaluating',
                         message='AI resolves the objective once; deterministic checks authorize any CPU change.' if mode == 'ai' else 'Offline deterministic mode: no LLM or API call.')
-                    controller = subprocess.Popen(controller_arguments(mode, run), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
+                    controller = subprocess.Popen(controller_arguments(mode, run, game=game), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
                     controller_started = now
                 if controller is not None and controller.poll() is None and now-controller_started > 180:
                     raise RuntimeError('Controller exceeded 180 seconds; interrupting it and checking recovery')
@@ -257,6 +308,18 @@ def experiment(state, run, cpu, mode, stop, done):
                 background_progress = read_json(run/'background.json')
                 batches = background_progress['completed_batches']
                 sample = dict(timestamp=time.monotonic(), ms=ms, error=error, web=after[0], background=after[1], phase=phase, batches=batches, background_timestamp=background_progress['monotonic'])
+                if game:
+                    frame_connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+                    try:
+                        frame_connection.request('GET', '/frame')
+                        reply = frame_connection.getresponse()
+                        if reply.status != 200:
+                            raise RuntimeError('Game frame endpoint failed')
+                        frame = json.loads(reply.read())
+                    finally:
+                        frame_connection.close()
+                    sample['game_frames'] = [item for item in frame.get('recent_frames', []) if item['sequence'] > last_frame]
+                    last_frame = frame['sequence']
                 state.add_sample(sample)
                 samples_file.write(json.dumps(sample)+'\n')
                 samples_file.flush()
@@ -304,13 +367,14 @@ def experiment(state, run, cpu, mode, stop, done):
             except OSError as error:
                 state.error(f'Could not save summary: {type(error).__name__}')
             result = state.snapshot()
-            print('RESULT: '+json.dumps({key: result[key] for key in ('status','summary','applied','restored','latency_reduction_percent','errors')}), flush=True)
+            print('RESULT: '+json.dumps({key: result[key] for key in ('status','summary','applied','restored','latency_reduction_percent','game_fps_change_percent','errors')}), flush=True)
             print(f'Artifacts: {run}', flush=True)
             done.set()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--game', action='store_true', help='Autoplay Python game with measured frame deadlines')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--mode', choices=('ai', 'deterministic'), default='ai')
     parser.add_argument('--auto-ai', action='store_true', help='Compatibility alias for --mode ai; AI mode starts automatically')
@@ -345,6 +409,7 @@ def main():
         # Bind before launching any workload or paying for an API call.
         with bind_server(args.port) as server:
             state = DemoState(args.mode)
+            state.update(game=args.game)
             server.demo = state
             server.timeout = .5
             run = Path(tempfile.mkdtemp(prefix='run-', dir=STATE_ROOT))
@@ -355,15 +420,15 @@ def main():
             print(f'RUN DATA: {run}', flush=True)
             print(f'MODE: {args.mode}. Warmup 10s -> baseline 15s -> one-minute objective -> restored 10s.', flush=True)
             print('Ctrl+C stops the demo safely. No manual registry paths or second CLI command are needed.', flush=True)
-            (run/'configuration.json').write_text(json.dumps(dict(mode=args.mode, python=sys.version,
+            (run/'configuration.json').write_text(json.dumps(dict(mode=args.mode, game=args.game, python=sys.version,
                 kernel=os.uname().release, workload_cpu=cpu, allowed_cpus=sorted(os.sched_getaffinity(0)),
                 web_iterations=400000, background_iterations=20000, baseline_seconds=15,
                 intent_seconds=60, restored_seconds=10, dashboard_port=server.server_port), indent=2)+'\n')
             temporary = STATE_ROOT/'latest.tmp'
-            temporary.write_text(json.dumps(dict(run=str(run), url=f'http://localhost:{server.server_port}'))+'\n')
+            temporary.write_text(json.dumps(dict(run=str(run), game=args.game, url=f'http://localhost:{server.server_port}'))+'\n')
             temporary.replace(STATE_ROOT/'latest.json')
             print('Other terminal commands: make demo-status, make proof, make results', flush=True)
-            worker = threading.Thread(target=experiment, args=(state, run, cpu, args.mode, stop, done))
+            worker = threading.Thread(target=experiment, args=(state, run, cpu, args.mode, stop, done, args.game))
             worker.start()
             finished_at = None
             try:
