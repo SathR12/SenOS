@@ -25,8 +25,10 @@ bash /mnt/j/Code/Projects/SenOS/scripts/web-demo.sh
 1. Validate Linux, cgroup v2, systemd user access, and local AI configuration.
 2. Start two uniquely named synthetic services at CPUWeight=100 on one allowed CPU.
 3. Warm up pressure for 10 seconds and measure baseline HTTP latency for 15 seconds.
-4. Ask the configured model: "Prioritize demo-web for one minute while keeping
-   demo-build progressing." Model resolution takes additional time, shown separately.
+4. Ask the configured model to evaluate the objective entered in the dashboard
+   (pre-filled with "Prioritize demo-web for one minute while keeping
+   demo-build progressing"). You can replace it during warmup; model resolution
+   takes additional time, shown separately.
 5. Monitor the validated objective locally. If pressure and safety checks pass,
    apply the bounded web boost from 100 to 200; background weight remains 100.
 6. Verify automatic restoration, collect 10 seconds of restored measurements,
@@ -71,6 +73,14 @@ bash scripts/web-demo.sh --mode deterministic --exit-after-run
 `--port 0` requests a free port. `--auto-ai` remains an alias for AI mode; AI mode
 is now the default and starts automatically. There is no second terminal command,
 manual registration step, or copied temporary database path.
+
+## Enter a custom intent
+
+In AI mode, edit the **Agent intent** field in the dashboard and select **Use
+this intent** during warmup. The text is sent only to the local demo server,
+then passed as the natural-language request to `senos agent run`. The form
+accepts up to 500 characters and becomes locked when baseline measurement ends.
+Deterministic/offline mode intentionally keeps its fixed rehearsal objective.
 
 ## Stop and inspect
 

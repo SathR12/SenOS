@@ -45,6 +45,22 @@ def test_no_action_is_not_reported_as_a_success():
     assert state.snapshot()['latency_reduction_percent'] is None
 
 
+def test_ai_intent_can_be_replaced_only_during_warmup():
+    state = demo.DemoState('ai')
+    accepted, _ = state.set_intent('Prioritize demo-web for two minutes')
+    assert accepted
+    assert state.snapshot()['intent_text'] == 'Prioritize demo-web for two minutes'
+    state.update(accepting_intent=False)
+    accepted, message = state.set_intent('Prioritize demo-build')
+    assert not accepted and 'already started' in message
+
+
+def test_deterministic_demo_rejects_custom_intents():
+    state = demo.DemoState('deterministic')
+    accepted, message = state.set_intent('Prioritize demo-web')
+    assert not accepted and 'AI mode' in message
+
+
 def test_controller_failure_is_visible_and_cannot_be_called_complete():
     state = demo.DemoState('ai')
     state.controller_finished(1, applied=True, restored=False)

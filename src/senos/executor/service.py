@@ -7,6 +7,7 @@ from senos.contracts import ActionResult, ActionStatus, Proposal, Workload
 from senos.policy.service import ValidationDecision
 from senos.recovery.errors import RestoreError
 from senos.storage.persistence import PersistenceError, PolicyStore
+from .locking import serialized
 from .cpu import CPUState
 
 
@@ -19,9 +20,11 @@ class ProposalExecutor:
     """Apply only an accepted CPU proposal through structured backend calls."""
 
     def __init__(self, database, backend: CPUWriter):
+        self.database = database
         self.store = PolicyStore(database)
         self.backend = backend
 
+    @serialized
     def execute(
         self,
         proposal: Proposal,

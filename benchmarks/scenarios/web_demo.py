@@ -40,6 +40,8 @@ class DemoState:
         self.applied = False
         self.restored = False
         self.controller_exit = None
+        self.intent_text = 'Prioritize demo-web for one minute while keeping demo-build progressing'
+        self.accepting_intent = True
 
     def update(self, **values):
         with self.lock:
@@ -52,6 +54,18 @@ class DemoState:
             self.message = message
             self.status = 'failed'
         print('ERROR: ' + message, flush=True)
+
+    def set_intent(self, text):
+        text = text.strip()
+        if not text or len(text) > 500:
+            return False, 'Enter an intent between 1 and 500 characters.'
+        with self.lock:
+            if self.mode != 'ai':
+                return False, 'Custom intents require AI mode; deterministic mode uses the fixed rehearsal objective.'
+            if not self.accepting_intent:
+                return False, 'The agent has already started evaluating this run.'
+            self.intent_text = text
+        return True, 'Intent saved. The agent will evaluate it after the baseline measurement.'
 
     def add_sample(self, sample):
         with self.lock:
@@ -86,13 +100,14 @@ class DemoState:
             return dict(status=self.status, stage=self.stage, message=self.message, mode=self.mode,
                 samples=list(self.samples), summary=summary, errors=list(self.errors), events=list(self.events),
                 applied=self.applied, restored=self.restored, controller_exit=self.controller_exit,
+                intent_text=self.intent_text, accepting_intent=self.accepting_intent,
                 latency_reduction_percent=reduction)
 
 
-def controller_arguments(mode, run):
+def controller_arguments(mode, run, intent_text=None):
     cli = [sys.executable, '-c', 'from senos.cli import app; app()']
     if mode == 'ai':
-        cli += ['agent', 'run', 'Prioritize demo-web for one minute while keeping demo-build progressing', '--watch']
+        cli += ['agent', 'run', intent_text or 'Prioritize demo-web for one minute while keeping demo-build progressing', '--watch']
     else:
         cli += ['monitor', 'start', 'demo-web', '--duration-seconds', '60', '--preserve', 'demo-build']
     return cli + ['--apply', '--json', '--db', str(run/'registry.sqlite3'), '--monitor-db', str(run/'monitor.sqlite3')]
@@ -118,6 +133,30 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass  # A closed browser tab is not a workload failure.
+
+    def do_POST(self):
+        if self.path != '/intent':
+            self.send_error(404, 'Use /intent to submit an objective')
+            return
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if length > 4096:
+                raise ValueError('Request is too large')
+            payload = json.loads(self.rfile.read(length))
+            text = payload.get('intent') if isinstance(payload, dict) else None
+            if not isinstance(text, str):
+                raise ValueError('Intent must be text')
+            accepted, message = self.server.demo.set_intent(text)
+            body = json.dumps({'accepted': accepted, 'message': message}).encode()
+            self.send_response(200 if accepted else 409)
+        except (ValueError, json.JSONDecodeError) as error:
+            body = json.dumps({'accepted': False, 'message': str(error)}).encode()
+            self.send_response(400)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, *args):
         pass
@@ -214,9 +253,10 @@ def experiment(state, run, cpu, mode, stop, done):
             while not stop.is_set():
                 now = time.monotonic()
                 if controller is None and now-baseline_start >= 15:
+                    state.update(accepting_intent=False)
                     state.update(stage='Resolving intent' if mode == 'ai' else 'Evaluating',
                         message='AI resolves the objective once; deterministic checks authorize any CPU change.' if mode == 'ai' else 'Offline deterministic mode: no LLM or API call.')
-                    controller = subprocess.Popen(controller_arguments(mode, run), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
+                    controller = subprocess.Popen(controller_arguments(mode, run, state.intent_text), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
                     controller_started = now
                 if controller is not None and controller.poll() is None and now-controller_started > 180:
                     raise RuntimeError('Controller exceeded 180 seconds; interrupting it and checking recovery')
