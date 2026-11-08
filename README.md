@@ -14,7 +14,7 @@ SenOS runs in Linux user space and uses existing operating-system controls. It d
 
 ## Project status
 
-This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, removal through `unregister`, and deterministic `intent prioritize`. `status` reads live CPU, memory, and pressure for registered Linux units and offers explicitly labeled demo readings with `--demo`; `restore` recovers recorded CPU weights; see [restore usage](docs/restore.md). The shared contracts and registry adapter are implemented; see [contract semantics](docs/contracts.md). Live read-only systemd/cgroup v2 telemetry is implemented. A [dry-run CPU proposal agent](docs/agents.md) is implemented. Automatic policy application is not implemented. Restore includes a restricted CPU-weight backend and persistent original-settings journal.
+This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, removal through `unregister`, deterministic `intent prioritize`, and opt-in validated CPU application with `agent cpu --target ... --apply`. `status` reads live CPU, memory, and pressure for registered Linux units and offers explicitly labeled demo readings with `--demo`; `restore` recovers recorded CPU weights; see [restore usage](docs/restore.md). The shared contracts, registry adapter, durable intent/proposal records, and execution snapshots are implemented; see [contract semantics](docs/contracts.md). Live read-only systemd/cgroup v2 telemetry is implemented. A [dry-run CPU proposal agent](docs/agents.md) and [single LLM advisor](docs/llm-agent.md) are implemented. Explicit `--watch --apply` CPU application is implemented for registered user units, with verified restoration and independent controller-crash recovery; see [CPU execution](docs/cpu-execution.md). Applying a proposal remains opt-in. The optional `agent run --watch --adaptive` mode asks the LLM for exact numeric CPU weights on successive fresh snapshots; `--apply` authorizes bounded execution and restoration. This is an experimental foreground feedback loop, not a guarantee of performance improvement. Restoration and reconciliation occur on restore or the next live evaluation rather than through a continuously running daemon.
 
 **We are building the CLI first.** A UI can follow once the controller, safety checks, and experiments work. Both interfaces should use the same application services and validated data contracts.
 
@@ -51,6 +51,10 @@ Initial exclusions: arbitrary process control, process termination, kernel modif
 | UI | Deferred | Reuse the controller through a service/API boundary when needed |
 
 These are initial engineering choices, not installed dependencies or guaranteed minimum requirements. A web framework, frontend framework, message broker, and multi-agent framework are not required for the first milestone.
+
+See the [technology stack](docs/tech-stack.md) for the implemented runtime,
+development tools, reference platform, optional integrations, and deliberately
+deferred technologies.
 
 ## Linux and Docker requirements
 
@@ -155,6 +159,7 @@ SenOS/
 |-- scripts/                       # Environment preflight and development helpers
 `-- docs/
     |-- architecture.md            # Component boundaries and design decisions
+    |-- tech-stack.md              # Current, optional, and deferred technologies
     |-- contracts.md               # Shared cross-component data semantics
     |-- development.md             # Reproducible Linux setup
     |-- intent.md                  # Deterministic intent command
@@ -197,7 +202,15 @@ Agree on shared contracts and their example payloads before implementing modules
 
 To set up a development environment, install [uv](https://docs.astral.sh/uv/) and run `uv sync`. Run the tests with `uv run pytest` and the CLI with `uv run senos --help`. `senos version`, `senos register NAME --unit UNIT`, `senos unregister NAME`, and `senos unregister --all` work. See [workload registration](docs/registration.md) for a WSL/Linux example, persistence, validation, and integration testing. `senos status` reads live metrics on supported Linux hosts and otherwise lists registrations with unavailable metrics; `senos status --demo` shows labeled synthetic samples. See [status usage](docs/status.md). `senos restore [NAME]` or `senos restore --all` restores recorded CPU settings. Without recorded changes it reports a successful no-op; see [restore usage](docs/restore.md).
 
-Use `senos intent prioritize NAME --duration-seconds N` to validate an objective without persisting or executing it; see [intent usage](docs/intent.md).
+Use `senos intent prioritize NAME --duration-seconds N` to validate an objective, or add `--evaluate` to collect live telemetry and return a dry-run CPU decision without applying it; see [intent usage](docs/intent.md).
+
+## Natural-language advisor
+
+After configuring `GEMINI_API_KEY` in a local `.env` (or selecting OpenAI with `OPENAI_API_KEY`), run `uv run senos agent run "Prioritize web for ten minutes while keeping build progressing"` with registered workload names. The single LLM uses read-only tools and returns a validated dry-run evaluation. See [setup, limits, and tests](docs/llm-agent.md).
+
+## Continuous observation
+
+Add `--watch --interval 5` to `senos agent run` to monitor the original objective locally after the LLM resolves it once. Use `senos monitor start NAME --duration-seconds 60` without an LLM. Both modes persist history and support cancellation; they remain observe-only unless explicitly authorized with `--apply`; see [monitoring usage](docs/monitoring.md). See [CPU execution](docs/cpu-execution.md) for application and recovery limits.
 
 ## CPU agent demo
 
@@ -216,6 +229,8 @@ Follow [AGENTS.md](AGENTS.md) for coding-agent contributions. Start focused task
 Publish changes through a pull request into `main`, explain the behavior and validation, request at least one teammate review, then squash-merge and delete the task branch. Do not push directly to `main` or force-push shared branches. A maintainer must configure GitHub branch protection separately; this documentation does not enforce it.
 
 ## Evaluation
+
+A runnable [CPU contention benchmark](docs/experiments.md) measures HTTP tail latency, background progress, and dry-run intent proposals using isolated Linux test services. Run `uv run python -m benchmarks.scenarios.cpu_contention` from the repository root. It does not apply policies.
 
 Compare Linux defaults, a manually configured static policy, and the SenOS adaptive policy under the same workload and VM configuration.
 
@@ -239,3 +254,62 @@ Choose an acceptable background slowdown before tuning and repeat experiments. H
 ## License
 
 See [LICENSE](LICENSE).
+
+## Quick commands and live demo
+
+Run these from the repository root inside WSL/Linux after the initial `uv sync`:
+
+```bash
+make help
+make demo          # AI: warmup, baseline, one-minute objective, verified restoration
+make demo-offline  # The same CPU experiment without an API call
+```
+
+Open the exact URL printed after `OPEN`. In another terminal:
+
+```bash
+make demo-status   # Live SenOS telemetry for the demo's separate registry
+make proof         # Independent systemctl, /proc and kernel cgroup readings
+make results       # Saved latency, background batches/second, errors and recovery
+make demo-stop     # Graceful stop; Ctrl+C in the launcher also works
+```
+
+The synthetic app does real CPU work: Linux runs real processes, the requester
+measures actual HTTP latency, and the restricted executor changes real CPU weights.
+`make proof` prints process IDs, workload command lines, kernel `cpu.weight`, and
+advancing `cpu.stat` counters. When applied, the web weight changes 100 -> 200 -> 100;
+the background weight stays 100. A policy change is not proof of a performance
+benefit: compare measured latency and background throughput as well.
+
+Background batch totals cover different-length phases. For example, 100 batches
+in 10 seconds is 10 batches/s, while 300 batches in 60 seconds is only 5 batches/s.
+The dashboard and `make results` show time-normalized batches/second and the
+measurement span. More accumulated batches alone does not mean faster progress.
+Results vary with host load; no-action decisions, errors, and regressions remain
+visible. See the [demo guide](docs/web-demo.md) and [benchmark](docs/experiments.md).
+
+For ordinary registered applications:
+
+```bash
+make status
+make register NAME=web UNIT=my-web.service
+make remove NAME=web
+make ask TEXT="Prioritize web for one minute"    # Dry-run AI advice
+make apply TEXT="Prioritize web for one minute"  # Explicit real CPU changes
+make prioritize NAME=web KEEP=build             # Direct CPU control, 60 seconds
+make restore NAME=web
+make cli ARGS="status --json"
+make test
+```
+
+`remove` leaves the application running. `restore` requires a workload name.
+Use `DURATION=120` with `prioritize` to change its duration, or add `DB=/path/to/registry.sqlite3`
+to ordinary commands for a custom registry. Demo helpers select their own registry
+automatically. These shortcuts use the existing project environment and delegate
+to the existing CLI and restricted executor. See [all shortcut details](docs/commands.md).
+
+Wang's optional [terminal throughput demo](scripts/demo/README.md) is also available through `make terminal-app`, `make terminal-build`, `make terminal-ai`, and `make terminal-cleanup`. It uses scoped services and its own registry; the colored bar measures relative throughput, not CPU percentage.
+
+For a visible autoplay game with a competing Python computation, run `make game` (offline) or `make game-ai` (Gemini). It measures actual Python frame times, FPS, late frames, and background throughput while applying and restoring a one-minute CPU priority. See [game setup and measurement limits](docs/game-demo.md).
+
+For presentation questions about CPU PSI thresholds, sample freshness, bounded weight calculation, and why these are experimental defaults, see [current CPU heuristic thresholds](docs/agents.md#current-heuristic-thresholds).

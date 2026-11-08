@@ -1,6 +1,6 @@
 # Manually test the live CPU agent
 
-Run inside WSL/Linux from this working checkout (`feat/cpu-agent`), after `uv sync`. The live agent only observes and proposes; it never changes CPU weights or records restoration data.
+Run inside WSL/Linux from this working checkout, after `uv sync`. The commands in this guide observe and propose without changing CPU weights or recording restoration data. Explicit application is covered in the [CPU execution guide](cpu-execution.md).
 
 ## Start with an existing registered workload
 
@@ -66,3 +66,7 @@ SENOS_RUN_SYSTEMD_TESTS=1 uv run pytest
 ```
 
 The opt-in live-agent test launches its own temporary services, invokes the real CLI, and verifies that CPU settings and registry bytes remain unchanged. Unit tests cover pressure-based proposals and no-action paths using controlled observations, plus registry, identity, weight, and hierarchy changes.
+
+## Measure application-level effects of contention
+
+Use the [automated benchmark](experiments.md) to launch a CPU-bound HTTP service and background computation, collect latency and throughput, and save a live intent-to-proposal evaluation. Run `uv run python -m benchmarks.scenarios.cpu_contention --seconds 2 --warmup 1 --repetitions 1` for a setup check. This measures contention and dry-run decisions; no proposed CPU settings are applied.

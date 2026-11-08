@@ -20,6 +20,7 @@ class WorkloadState(str, Enum):
 class Observation(ContractModel):
     """A point-in-time set of health vitals for one workload."""
 
+    intent_id: UUID | None = None
     workload_id: UUID
     observed_at: AwareDatetime = Field(default_factory=utc_now)
     state: WorkloadState
@@ -31,3 +32,6 @@ class Observation(ContractModel):
     cpu_pressure_some_avg10: Percent | None = None
     memory_pressure_some_avg10: Percent | None = None
     memory_pressure_full_avg10: Percent | None = None
+    cpu_weight: int | None = Field(default=None, strict=True, ge=1, le=10_000)
+    invocation_id: str | None = None
+    cgroup_identity: str | None = None

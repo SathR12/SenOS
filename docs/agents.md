@@ -1,6 +1,6 @@
-# First agent: CPU proposals
+# CPU evaluator and single LLM advisor
 
-The first agent is a deterministic Python module, not an LLM service. It uses the existing Workload, Observation, Intent, and Proposal contracts. It is built and tested independently of the live telemetry collector. `senos status` now supports live Linux readings; the agent runner can now assemble a context from registered workloads and real observations using --target, or accept explicit demo/file inputs. No additional runtime dependencies are required.
+The CPU evaluator is a deterministic Python module. A separate [single LLM advisor](llm-agent.md) uses read-only tools and submits validated objectives to it through `senos agent run`. It uses the existing Workload, Observation, Intent, and Proposal contracts. It is built and tested independently of the live telemetry collector. `senos status` now supports live Linux readings; the agent runner can now assemble a context from registered workloads and real observations using --target, or accept explicit demo/file inputs. No additional runtime dependencies are required.
 
 ## Use the small custom harness
 
@@ -14,7 +14,7 @@ uv run senos agent cpu --input /path/to/context.json --json
 
 Exactly one of --target, --demo, or --input is required. Demo inputs are synthetic. A file is caller-provided data, not independently verified telemetry or proof of registration. Output always says `mode: dry_run` and `source: live`, `demo`, or `file`. Live mode reads the registry, systemd, and cgroup files. No mode writes resource settings or a database, captures restore settings, or applies proposals.
 
-The harness validates a CPUContext and invokes CPUAgent.evaluate. JSON includes the complete context and collection warnings so a recommendation can be inspected. There is no daemon, agent-to-agent messaging system, model provider, or automatic control loop. The CLI only parses inputs and renders outputs; the agent and runner can be reused independently. The live context builder lives in `src/senos/agents/live.py`.
+The harness validates a CPUContext and invokes CPUAgent.evaluate. JSON includes the complete context and collection warnings so a recommendation can be inspected. The CPU harness does not call a model. The separate LLM advisor supports Gemini and OpenAI providers; neither path has a daemon, agent-to-agent messaging, or an autonomous application-feedback optimizer. Explicit supervised application is available separately through [CPU execution](cpu-execution.md). A separate [foreground observer](monitoring.md) repeats local evaluation without executing changes. The CLI only parses inputs and renders outputs; the agent and runner can be reused independently. The live context builder lives in `src/senos/agents/live.py`.
 
 ## Inputs and outputs
 
@@ -55,7 +55,7 @@ The heuristic is a starting baseline, not proof that user-visible latency will i
 
 The collector gathers three observation rounds, with spacing sufficient for the policy's observation window. It reads actual cgroup `cpu.weight` before and after collection. A configured systemd CPUWeight can be unset while the effective kernel weight is readable as 100; this measured value is used without inventing a baseline. Restore continues to preserve the original configured setting separately.
 
-If weights, invocation identity, or cgroup location change during collection, that workload's evidence is discarded. A changed registered inventory aborts the snapshot. Non-sibling workloads remain visible but cannot act as CPU-weight peers. Sampling is read-only and normally takes several seconds. Missing data or zero pressure should yield no_action, not force a proposal. Live mode currently has no persisted last-change history: cooldown persistence and the automatic control loop still belong to the future controller. There is no --apply option.
+If weights, invocation identity, or cgroup location change during collection, that workload's evidence is discarded. A changed registered inventory aborts the snapshot. Non-sibling workloads remain visible but cannot act as CPU-weight peers. Sampling is read-only and normally takes several seconds. Missing data or zero pressure should yield no_action, not force a proposal. Live proposals are persisted before validation. `--apply` is opt-in, rechecks the unit identity and expected weight, records recovery state before writing, and verifies the effective weight afterward. Expired durable actions are reconciled on the next live evaluation or restore command; there is not yet a continuously running controller daemon.
 
 For manual verification and a reproducible contention setup, see [live agent testing](live-agent-testing.md).
 
@@ -63,11 +63,11 @@ For manual verification and a reproducible contention setup, see [live agent tes
 
 A small custom runner makes decisions reproducible and keeps monitoring inexpensive. No language-model calls occur in the periodic decision path. Begin with this measurable baseline before adding a general agent framework.
 
-A future natural-language adapter can interpret a user request into Intent. Optional LLM advice can be added through a narrow adapter after evaluating it against this baseline. It must produce validated structured output and pass independent safety checks. The prompt template in `src/senos/agents/prompts/cpu_advisor.md` is a design starting point; no current command executes it.
+The [single LLM advisor](llm-agent.md) interprets a request through closed read-only tools and submits an Intent to this baseline. Model rationale remains separate from the authoritative deterministic CPU decision. The prompt template in `src/senos/agents/prompts/cpu_advisor.md` is a design starting point; no current command executes it.
 
 ## Before automatic execution
 
-A future controller must fetch real observations and current weights, verify registration against the real registry, resolve cgroup/instance identity, validate proposals and preserved-workload constraints, enforce cooldowns using persisted action history, serialize capture/apply/restore, verify effects, enforce expiration, and recover after failure. The existing restore hook is available, but there is no automatic apply pipeline yet.
+A future controller must fetch real observations and current weights, verify registration against the real registry, resolve cgroup/instance identity, validate proposals and preserved-workload constraints, enforce cooldowns using persisted action history, serialize capture/apply/restore, verify effects, enforce expiration, and recover after failure. The existing restore hook is available, but explicit supervised application is now available through [CPU execution](cpu-execution.md).
 
 ## Files and tests
 
@@ -78,3 +78,42 @@ A future controller must fetch real observations and current weights, verify reg
 - `tests/unit/test_cpu_agent.py`: decision and CLI behavior, including no OS/executor access.
 
 Run `uv run pytest`. The existing opt-in systemd tests exercise registration and restore, not agent effectiveness. Effectiveness must be evaluated later against Linux defaults and a static policy with real latency and background-progress measurements.
+
+## Intent-driven dry run
+
+Use `senos intent prioritize NAME --duration-seconds 600 --preserve OTHER --evaluate` to resolve a structured objective and evaluate it against live telemetry in one command. The original Intent is preserved through the optional CPU Proposal. See [intent usage](intent.md) for JSON output and limitations. This path does not apply CPU settings or call an LLM.
+
+## Current heuristic thresholds
+
+The LLM supplies a registered target, preserved workload names, duration, and a
+rationale. It does not choose these thresholds or the CPU weight. The current
+CPU proposal rule uses experimental defaults in `CPUPolicy`:
+
+| Check | Comparison | Purpose |
+| --- | --- | --- |
+| Sustained CPU pressure | Target `some avg10` >= 5% in all three latest observations | Require evidence of waiting for CPU, not just high utilization |
+| Sample count and span | Three distinct observations spanning >= 2 seconds | Avoid deciding from a single reading |
+| Freshness | Each target observation no older than 10 seconds | Reject stale evidence |
+| Memory-pressure guard | Any available target `some avg10` >= 10% blocks a CPU-only proposal | Avoid assuming CPU contention is the only bottleneck |
+| Peer eligibility | At least one active, CPU-using registered peer in the comparable scheduling group | Require a managed competitor |
+| Proposal | `min(1000, int(current_weight * 2))` | Make a bounded relative-priority increase |
+| Execution ceiling | At most `min(1000, original_weight * 2)` | Prevent repeated boosts from compounding |
+| Real-change cooldown | At least 30 seconds after a real change within the session | Limit repeated writes |
+
+The target must be active with positive measured CPU use. The intent must remain
+valid; registered targets, preserved workloads, identities, bounds, and recovery
+readiness are independently checked. There is no CPU-utilization threshold such
+as "CPU > 80%". The memory check uses pressure, not the percentage of RAM occupied;
+a missing memory-pressure reading is not evidence that pressure is zero.
+
+For example, CPU PSI readings `6%, 8%, 7%` pass the pressure comparison, while
+`2%, 8%, 7%` do not. Passing this comparison alone does not authorize execution.
+With all other checks satisfied, weight 100 can be proposed as 200. The executor
+rejects a later 400 proposal when the original weight was 100.
+
+These parameters are initial engineering choices intended to reduce transient
+reactions and bound policy changes. They were not learned by Gemini, derived as
+optimal values from Linux, or selected through a completed parameter-sweep study.
+Three readings of a smoothed signal are a persistence check, not independent
+statistical trials. Future tuning should compare repeated responsiveness and
+background-throughput measurements against defaults and static policies.

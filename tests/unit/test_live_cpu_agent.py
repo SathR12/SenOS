@@ -9,6 +9,7 @@ from senos.agents.cpu import CPUAgent
 from senos.agents.live import collect_live_context
 from senos.contracts import Observation
 from senos.telemetry.linux import CPUWeightReading
+from senos.storage.persistence import PolicyStore
 from senos.workloads.registry import Registry
 from senos.workloads.systemd import UnitInfo
 
@@ -156,3 +157,122 @@ def test_cli_live_mode_renders_evidence_and_passes_selection(monkeypatch, tmp_pa
     assert "PSI=15.0%" in result.output
     assert calls[0][1] == "web"
     assert calls[0][2] == {"preserve_names": ("build",), "duration_seconds": 300}
+
+
+@pytest.mark.parametrize("pressure,status", [(20, "proposed"), (0, "no_action")])
+def test_intent_pipeline_cli_preserves_identity_and_never_writes(setup, monkeypatch, pressure, status):
+    import json
+    from senos.intent import IntentService
+    from senos.intent import pipeline
+
+    database, telemetry = setup
+    telemetry.pressure = pressure
+    original = IntentService.prioritize
+    captured = []
+
+    def prioritize(service, *args, **kwargs):
+        intent = original(service, *args, **kwargs).model_copy(update={"submitted_at": NOW})
+        captured.append(intent)
+        return intent
+
+    def collect(database, *, intent):
+        return collect_live_context(database, intent=intent, telemetry=telemetry, pause=telemetry.pause)
+
+    class Clock:
+        @staticmethod
+        def now(tz):
+            return telemetry.now
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Dry-run pipeline must not write policies or recovery records")
+
+    monkeypatch.setattr(IntentService, "prioritize", prioritize)
+    monkeypatch.setattr(pipeline, "collect_live_context", collect)
+    monkeypatch.setattr(pipeline, "datetime", Clock)
+    monkeypatch.setattr("senos.executor.cpu.SystemdCPUBackend.write", forbidden)
+    monkeypatch.setattr("senos.storage.changes.CPUJournal.capture", forbidden)
+    result = CliRunner().invoke(app, ["intent", "prioritize", "web", "--duration-seconds", "600", "--preserve", "build", "--evaluate", "--json", "--db", str(database)])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["executed"] is False and payload["mode"] == "dry_run"
+    assert payload["intent"] == payload["context"]["intent"] == captured[0].model_dump(mode="json")
+    assert payload["decision"]["status"] == status
+    if status == "proposed":
+        proposal = payload["decision"]["proposal"]
+        assert proposal["intent_id"] == str(captured[0].intent_id)
+        assert proposal["workload_id"] == str(captured[0].target_workload_id)
+        assert datetime.fromisoformat(proposal["expires_at"].replace("Z", "+00:00")) == NOW + timedelta(seconds=600)
+    assert PolicyStore(database).get_intent(captured[0].intent_id).model_dump(mode="json") == captured[0].model_dump(mode="json")
+
+
+@pytest.mark.parametrize("name", ["web", "build"])
+def test_existing_intent_rejects_replaced_workload_identity(setup, name):
+    from senos.intent import IntentService
+
+    database, telemetry = setup
+    registry = Registry(database, Resolver())
+    intent = IntentService(registry).prioritize("web", 600, ("build",))
+    registry.unregister(name)
+    registry.register(name, name + ".service")
+    with pytest.raises(ValueError, match="no longer registered"):
+        collect_live_context(database, intent=intent, telemetry=telemetry)
+    assert telemetry.rounds == 0
+
+
+def test_supplied_intent_deadline_is_not_reset_by_sampling(setup):
+    from senos.intent import IntentService
+
+    database, telemetry = setup
+    intent = IntentService(Registry(database)).prioritize("web", 1).model_copy(update={"submitted_at": NOW})
+    context, _ = collect_live_context(database, intent=intent, telemetry=telemetry, pause=telemetry.pause)
+    assert context.intent == intent
+    decision = CPUAgent().evaluate(context, now=telemetry.now)
+    assert decision.status == "no_action" and "expired" in decision.reason
+
+
+def test_intent_evaluation_on_unsupported_host_has_readable_error(setup, monkeypatch):
+    database, _ = setup
+    monkeypatch.setattr("senos.agents.live.default_telemetry", lambda: None)
+    result = CliRunner().invoke(app, ["intent", "prioritize", "web", "--duration-seconds", "600", "--evaluate", "--db", str(database)])
+    assert result.exit_code == 1
+    assert "senos intent:" in result.output and "requires Linux" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_supplied_intent_cannot_be_overridden_by_names(setup):
+    from senos.intent import IntentService
+
+    database, telemetry = setup
+    intent = IntentService(Registry(database)).prioritize("web", 600)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        collect_live_context(database, "build", intent=intent, telemetry=telemetry)
+    assert telemetry.rounds == 0
+
+
+@pytest.mark.parametrize("status", ["proposed", "no_action"])
+def test_intent_evaluation_text_output_is_explicitly_dry_run(setup, monkeypatch, status):
+    from senos.agents.demo import cpu_context
+    from senos.intent import pipeline
+
+    database, _ = setup
+    decision = CPUAgent().evaluate(cpu_context()).model_dump(mode="json")
+    if status == "no_action":
+        decision = {"status": "no_action", "reason": "No sustained pressure", "proposal": None}
+    monkeypatch.setattr(pipeline, "evaluate_intent", lambda intent, database: {"warnings": ["collection note"], "decision": decision})
+    result = CliRunner().invoke(app, ["intent", "prioritize", "web", "--duration-seconds", "600", "--evaluate", "--db", str(database)])
+    assert result.exit_code == 0, result.output
+    assert f"DRY RUN (live): {status}" in result.output
+    assert "Note: collection note" in result.output
+    assert ("Would set CPUWeight" in result.output) == (status == "proposed")
+    assert result.output.rstrip().endswith("No resource policy was applied.")
+
+
+def test_restore_intent_is_rejected_before_cpu_collection(setup):
+    from senos.contracts import Intent
+
+    database, telemetry = setup
+    target = Registry(database).get_by_name("web")
+    intent = Intent(kind="restore", target_workload_id=target.workload_id, source_text="restore web")
+    with pytest.raises(ValueError, match="Only prioritize"):
+        collect_live_context(database, intent=intent, telemetry=telemetry)
+    assert telemetry.rounds == 0

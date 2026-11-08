@@ -3,6 +3,7 @@
 from .action_result import ActionResult, ActionStatus
 from .intent import Intent, IntentKind
 from .observation import Observation, WorkloadState
+from .snapshot import ExecutionSnapshot
 from .proposal import Proposal, ProposalAction
 from .workload import Workload
 
@@ -12,6 +13,7 @@ __all__ = [
     "Intent",
     "IntentKind",
     "Observation",
+    "ExecutionSnapshot",
     "Proposal",
     "ProposalAction",
     "Workload",

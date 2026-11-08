@@ -8,6 +8,7 @@ import sqlite3
 from senos.recovery.errors import RestoreError
 from senos.workloads.errors import RegistrationError
 from .registry import RegistryStore
+from senos.executor.locking import serialized
 
 
 class CPUJournal:
@@ -27,6 +28,7 @@ class CPUJournal:
         except (OSError, sqlite3.Error) as error:
             raise RestoreError("Cannot read CPU restore journal") from error
 
+    @serialized
     def capture(self, workload, state) -> None:
         try:
             with closing(self.store._connect()) as connection, connection:
@@ -49,6 +51,7 @@ class CPUJournal:
         except (OSError, sqlite3.Error, RegistrationError) as error:
             raise RestoreError("Cannot persist original CPU settings; do not apply a policy") from error
 
+    @serialized
     def finish(self, identifier: str, captured_at: str, operation) -> str | None:
         """Serialize recovery with unregister; retain pending rows on failure."""
         try:
@@ -68,6 +71,8 @@ class CPUJournal:
                     connection.execute("UPDATE cpu_restore_points SET last_error=? WHERE workload_id=?", (str(error), identifier))
                     return str(error)
                 connection.execute("UPDATE cpu_restore_points SET restored_at=?, last_error=NULL WHERE workload_id=?", (datetime.now(timezone.utc).isoformat(), identifier))
+                if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='cpu_execution_sessions'").fetchone():
+                    connection.execute("UPDATE cpu_execution_sessions SET status='restored' WHERE workload_id=? AND status='active'", (identifier,))
                 return None
         except (OSError, sqlite3.Error, RegistrationError) as error:
             raise RestoreError("Cannot update CPU restore journal; recovery remains pending") from error
