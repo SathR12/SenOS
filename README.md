@@ -52,6 +52,10 @@ Initial exclusions: arbitrary process control, process termination, kernel modif
 
 These are initial engineering choices, not installed dependencies or guaranteed minimum requirements. A web framework, frontend framework, message broker, and multi-agent framework are not required for the first milestone.
 
+See the [technology stack](docs/tech-stack.md) for the implemented runtime,
+development tools, reference platform, optional integrations, and deliberately
+deferred technologies.
+
 ## Linux and Docker requirements
 
 Use a dedicated Linux VM as the reference development environment. A suggested starting allocation is **4 vCPUs, 8 GB RAM, and 30 GB disk**, adjusted to the experiments being run.
@@ -155,6 +159,7 @@ SenOS/
 |-- scripts/                       # Environment preflight and development helpers
 `-- docs/
     |-- architecture.md            # Component boundaries and design decisions
+    |-- tech-stack.md              # Current, optional, and deferred technologies
     |-- contracts.md               # Shared cross-component data semantics
     |-- development.md             # Reproducible Linux setup
     |-- intent.md                  # Deterministic intent command
