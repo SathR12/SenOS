@@ -171,3 +171,5 @@ Reviews are at least 10 seconds apart, plus model and sampling time, with at mos
 This version uses resource telemetry and recorded action outcomes. Application FPS, request latency, and background batches per second are displayed by benchmarks but are not inputs to the advisor. Memory controls are not implemented. Measure application-level results separately; model-selected weights do not guarantee better performance.
 
 `make demo` and `make game-ai` now enable adaptive reviews automatically; the offline demo and `make game` retain deterministic control.
+
+Gemini transport failures receive one bounded retry (each request uses the 60-second socket timeout). HTTP authentication, quota, and model errors are not retried. A retry may incur another API call. The original execution deadline is never extended; persistent failure still stops and restores the session. Demo dashboards show sanitized CLI provider errors directly.
