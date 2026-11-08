@@ -41,6 +41,7 @@ Keep source metadata when consuming/exporting demo values so synthetic readings 
 - `src/senos/telemetry/status.py`: status service and snapshot rows.
 - `src/senos/telemetry/fake.py`: isolated synthetic provider.
 - `src/senos/contracts/`: shared validation and schema definitions.
+- `src/senos/workloads/registry.py`: application-level shared-contract access.
 - `src/senos/storage/registry.py`: persistent records and read-only listing.
 
 The status tests cover registry data, empty/missing databases, invalid data, JSON identities, explicit demo labeling, no default demo fallback, and registration removal. The opt-in WSL/Linux systemd test also exercises registration, status, and unregistration across separate CLI processes. Live telemetry and resource control remain future work.

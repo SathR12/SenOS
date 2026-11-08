@@ -1,10 +1,9 @@
-"""CLI entry point. Registry status and explicit demo data; restore is pending.
+"""CLI entry point. Registry, status, and intent work; restore is pending.
 
 Keep this module limited to argument parsing and output so a future UI can
 reuse the same application services.
 """
 
-from dataclasses import asdict
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -12,6 +11,7 @@ from pathlib import Path
 import typer
 
 from senos.config import default_registry_path
+from senos.intent import IntentError, IntentService
 from senos.telemetry.status import StatusError, get_status
 from senos.workloads.registry import Registry, RegistrationError
 
@@ -19,6 +19,8 @@ app = typer.Typer(
     help="SenOS: natural-language user intent driving Linux resource policies.",
     no_args_is_help=True,
 )
+intent_app = typer.Typer(help="Submit validated workload objectives.")
+app.add_typer(intent_app, name="intent")
 
 
 def _not_implemented(command: str) -> None:
@@ -35,6 +37,39 @@ def main() -> None:
 def show_version() -> None:
     """Print the installed SenOS version."""
     typer.echo(version("senos"))
+
+
+@intent_app.command("prioritize")
+def prioritize_intent(
+    target: str = typer.Argument(..., help="Registered workload name to prioritize."),
+    duration_seconds: int = typer.Option(..., "--duration-seconds", help="Intent duration from 1 through 86400 seconds."),
+    preserve: list[str] | None = typer.Option(None, "--preserve", help="Registered workload that must keep progressing; repeat as needed."),
+    db: Path | None = typer.Option(None, "--db", envvar="SENOS_REGISTRY_PATH", help="Override the per-user registry database path."),
+    json_output: bool = typer.Option(False, "--json", help="Print the validated intent as JSON."),
+) -> None:
+    """Validate a temporary priority objective; no resource policy is applied."""
+    try:
+        intent = IntentService(
+            Registry(db if db is not None else default_registry_path())
+        ).prioritize(target, duration_seconds, tuple(preserve or ()))
+    except IntentError as error:
+        typer.echo(f"senos intent: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+    if json_output:
+        typer.echo(json.dumps({
+            "accepted": True,
+            "executed": False,
+            "intent": intent.model_dump(mode="json"),
+        }))
+        return
+
+    typer.echo(
+        f"Validated intent: prioritize {target.strip()} for {duration_seconds} seconds."
+    )
+    if preserve:
+        typer.echo(f"Preserve: {', '.join(name.strip() for name in preserve)}")
+    typer.echo("No resource policy was applied.")
 
 
 @app.command()
@@ -89,10 +124,12 @@ def register(
         typer.echo(f"senos register: {error}", err=True)
         raise typer.Exit(code=1) from error
     if json_output:
-        typer.echo(json.dumps({"created": created, "workload": asdict(workload)}))
+        payload = workload.model_dump(mode="json")
+        payload["id"] = payload.pop("workload_id")
+        typer.echo(json.dumps({"created": created, "workload": payload}))
     else:
         label = "Registered" if created else "Already registered"
-        typer.echo(f"{label} {workload.name}: {workload.unit} ({workload.manager}, id={workload.id})")
+        typer.echo(f"{label} {workload.name}: {workload.unit} ({workload.manager}, id={workload.workload_id})")
 
 
 @app.command()
