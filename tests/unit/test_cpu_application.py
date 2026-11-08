@@ -200,3 +200,50 @@ def test_write_before_crash_is_recoverable_without_a_success_audit_record(setup)
     application.finish(session)
     assert backend.read(registry.get_by_name("web")).weight == 100
     assert CPUJournal(database).pending() == []
+
+
+def adaptive_evaluation(evaluate, weight, clock):
+    from senos.contracts import Proposal
+    value = evaluate()
+    context = CPUContext.model_validate(value['context'])
+    context = context.model_copy(update={'observations': tuple(s.model_copy(update={'memory_pressure_some_avg10': 0}) for s in context.observations)})
+    proposal = Proposal(intent_id=context.intent.intent_id, workload_id=context.intent.target_workload_id,
+        expected_cpu_weight=context.current_cpu_weights[context.intent.target_workload_id], proposed_cpu_weight=weight,
+        rationale='LLM selected this bounded weight from current resource readings', created_at=clock[0],
+        expires_at=context.intent.submitted_at+timedelta(seconds=context.intent.duration_seconds))
+    return {'context': context.model_dump(mode='json'), 'decision': {'status': 'proposed', 'reason': proposal.rationale, 'proposal': proposal.model_dump(mode='json')}}
+
+
+def test_adaptive_executor_uses_model_weight_and_can_reduce_within_original_bounds(setup):
+    _, registry, backend, application, intent, evaluate, clock = setup
+    session = application.begin(intent)
+    result = application.apply_adaptive(session, adaptive_evaluation(evaluate, 150, clock))
+    assert result.effective_cpu_weight == 150
+    clock[0] += timedelta(seconds=31)
+    result = application.apply_adaptive(session, adaptive_evaluation(evaluate, 125, clock))
+    assert result.effective_cpu_weight == 125
+    application.finish(session)
+    assert backend.read(registry.get_by_name('web')).weight == 100
+
+
+@pytest.mark.parametrize('weight', [50, 201])
+def test_adaptive_executor_rejects_weights_outside_original_range(setup, weight):
+    _, _, backend, application, intent, evaluate, clock = setup
+    session = application.begin(intent)
+    result = application.apply_adaptive(session, adaptive_evaluation(evaluate, weight, clock))
+    assert result.status.value == 'rejected' and backend.writes == []
+    application.finish(session)
+
+
+def test_adaptive_executor_rejects_stale_evidence_and_missing_memory_pressure(setup):
+    _, _, backend, application, intent, evaluate, clock = setup
+    session = application.begin(intent)
+    value = adaptive_evaluation(evaluate, 150, clock)
+    clock[0] += timedelta(seconds=11)
+    assert application.apply_adaptive(session, value).status.value == 'rejected'
+    value = adaptive_evaluation(evaluate, 150, clock)
+    for sample in value['context']['observations']:
+        sample['memory_pressure_some_avg10'] = None
+    assert application.apply_adaptive(session, value).status.value == 'rejected'
+    assert backend.writes == []
+    application.finish(session)

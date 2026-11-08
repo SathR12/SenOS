@@ -277,3 +277,92 @@ def test_apply_mode_restore_failure_is_not_reported_as_success(setup):
 def test_cli_apply_requires_watch_before_any_model_call():
     result = CliRunner().invoke(app, ["agent", "run", "Prioritize web", "--apply"])
     assert result.exit_code == 2 and "requires --watch" in result.output
+
+
+def test_adaptive_monitor_repeated_model_choices_replace_heuristic(setup):
+    from senos.agents.adaptive import AdaptiveCPUAdvisor
+    class Provider:
+        model = "scripted"
+        def respond(self, history, tools, instructions):
+            return {"status": "completed", "output": [{"type": "function_call", "name": "recommend_cpu_weight",
+                "arguments": json.dumps({"cpu_weight": 150, "rationale": "Choose intermediate share from fresh contention evidence"})}]}
+    advisor = AdaptiveCPUAdvisor(provider=Provider())
+    events = []
+    result = run(setup, max_cycles=2, advisor=advisor, on_event=events.append)
+    assert result["cycles"] == advisor.calls == 2
+    assert len(setup[-1]) == 4  # Evidence is refreshed after every model response.
+    assert all(event["evaluation"]["decision"]["proposal"]["proposed_cpu_weight"] == 150 for event in events)
+    assert events[1]["evaluation"]["advisor"]["review"] == 2
+    assert result["executed"] is False
+
+
+def test_adaptive_response_after_expiration_is_discarded(setup):
+    from senos.agents.adaptive import AdaptiveCPUAdvisor
+    class Provider:
+        model = "slow"
+        def respond(self, *args):
+            setup[3].sleep(61)
+            return {"status": "completed", "output": [{"type": "function_call", "name": "recommend_cpu_weight",
+                "arguments": json.dumps({"cpu_weight": 150, "rationale": "Late response"})}]}
+    result = run(setup, advisor=AdaptiveCPUAdvisor(provider=Provider()))
+    assert result["cycles"] == 0 and result["status"] == "expired"
+
+
+@pytest.mark.parametrize("arguments", [
+    {"cpu_weight": 201, "rationale": "Too large"},
+    {"cpu_weight": True, "rationale": "Wrong type"},
+    {"cpu_weight": 150, "rationale": "Extra field", "command": "anything"},
+])
+def test_adaptive_invalid_response_stops_monitor(setup, arguments):
+    from senos.agents.adaptive import AdaptiveCPUAdvisor
+    class Provider:
+        model = "invalid"
+        def respond(self, *args):
+            return {"status": "completed", "output": [{"type": "function_call", "name": "recommend_cpu_weight",
+                "arguments": json.dumps(arguments)}]}
+    with pytest.raises(MonitorError, match="invalid|outside"):
+        run(setup, advisor=AdaptiveCPUAdvisor(provider=Provider()))
+
+
+def test_adaptive_provider_failure_restores_application_session(setup):
+    from senos.agents.adaptive import AdaptiveCPUAdvisor
+    from senos.agents.provider import AgentError
+    class Provider:
+        model = "unavailable"
+        def respond(self, *args):
+            raise AgentError("Provider unavailable")
+    class Store:
+        def get(self, identifier):
+            return {"original_effective": 100, "last_change_at": None}
+    class Application:
+        store = Store()
+        finalized = False
+        def begin(self, intent):
+            return "test"
+        def apply_adaptive(self, *args):
+            pytest.fail("No policy may be applied after a provider failure")
+        def finish(self, identifier):
+            self.finalized = True
+            return []
+    application = Application()
+    with pytest.raises(MonitorError, match="Provider unavailable"):
+        run(setup, apply=True, application=application, advisor=AdaptiveCPUAdvisor(provider=Provider()))
+    assert application.finalized
+
+
+def test_adaptive_budget_is_validated_before_starting_session(setup):
+    with pytest.raises(MonitorError, match="at most 12"):
+        run(setup, advisor=object(), max_cycles=13)
+
+
+def test_stop_during_model_response_discards_recommendation(setup):
+    from senos.agents.adaptive import AdaptiveCPUAdvisor
+    class Provider:
+        model = "stopped"
+        def respond(self, *args):
+            store = MonitorStore(setup[1])
+            store.stop(store.list_runs()[0]["run_id"])
+            return {"status": "completed", "output": [{"type": "function_call", "name": "recommend_cpu_weight",
+                "arguments": json.dumps({"cpu_weight": 150, "rationale": "Discard after stop"})}]}
+    result = run(setup, advisor=AdaptiveCPUAdvisor(provider=Provider()))
+    assert result["status"] == "stopped" and result["cycles"] == 0

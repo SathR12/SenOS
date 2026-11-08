@@ -6,7 +6,7 @@ help:
 	@bash scripts/run-python.sh scripts/commands.py help
 
 demo:
-	@bash scripts/web-demo.sh --mode ai
+	@bash scripts/web-demo.sh --mode ai --adaptive
 
 demo-offline:
 	@bash scripts/web-demo.sh --mode deterministic
@@ -35,4 +35,8 @@ terminal-apply:
 game:
 	@bash scripts/web-demo.sh --game --mode deterministic
 game-ai:
-	@bash scripts/web-demo.sh --game --mode ai
+	@bash scripts/web-demo.sh --game --mode ai --adaptive
+
+.PHONY: adapt
+adapt:
+	@bash scripts/run-python.sh -c 'import os; from senos.cli import app; app(["agent", "run", os.environ.get("TEXT", ""), "--watch", "--adaptive", "--apply", "--interval", "10", "--max-cycles", "12"])'

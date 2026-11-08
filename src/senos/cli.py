@@ -35,7 +35,7 @@ monitor_app = typer.Typer(help="Monitoring sessions and local history; dry-run b
 app.add_typer(monitor_app, name="monitor")
 
 
-def _watch_intent(intent_payload, database, monitor_db, interval, max_cycles, json_output, *, initial=None, apply=False):
+def _watch_intent(intent_payload, database, monitor_db, interval, max_cycles, json_output, *, initial=None, apply=False, advisor=None):
     from senos.agents.monitor import monitor_intent
     from senos.contracts import Intent
     from senos.storage.monitor import MonitorError
@@ -68,7 +68,7 @@ def _watch_intent(intent_payload, database, monitor_db, interval, max_cycles, js
             typer.echo(f"Would set CPUWeight {proposal['expected_cpu_weight']} -> {proposal['proposed_cpu_weight']} (not applied)")
     try:
         result = monitor_intent(Intent.model_validate(intent_payload), database, history,
-            interval=interval, max_cycles=max_cycles, initial_evaluation=initial, apply=apply,
+            interval=interval, max_cycles=max_cycles, initial_evaluation=initial, apply=apply, advisor=advisor,
             on_event=observed, on_start=started)
     except (MonitorError, ValueError) as error:
         typer.echo(f"senos monitor: {error}", err=True)
@@ -152,6 +152,7 @@ def llm_agent(
     db: Path | None = typer.Option(None, "--db", envvar="SENOS_REGISTRY_PATH", help="Registry database."),
     apply: bool = typer.Option(False, "--apply", help="Authorize bounded CPU application; requires --watch and restores on exit."),
     watch: bool = typer.Option(False, "--watch", help="Monitor the interpreted objective locally until its original deadline."),
+    adaptive: bool = typer.Option(False, "--adaptive", help="Ask the LLM for exact CPU weights each cycle; requires --watch, maximum 12 reviews."),
     interval: float = typer.Option(5, "--interval", min=1, max=60, help="Pause between monitoring cycles, in seconds."),
     max_cycles: int | None = typer.Option(None, "--max-cycles", min=1, max=10000, help="Stop monitoring after this many cycles."),
     monitor_db: Path | None = typer.Option(None, "--monitor-db", help="Separate SQLite monitor history database."),
@@ -163,6 +164,10 @@ def llm_agent(
     from senos.agents.llm import run_agent
     from senos.agents.provider import AgentError
 
+    if adaptive and not watch:
+        raise typer.BadParameter("--adaptive requires --watch")
+    if adaptive and max_cycles is not None and max_cycles > 12:
+        raise typer.BadParameter("--adaptive permits at most 12 reviews")
     if apply and not watch:
         raise typer.BadParameter("--apply requires --watch so restoration is supervised")
     if not watch and (interval != 5 or max_cycles is not None or monitor_db is not None):
@@ -176,12 +181,20 @@ def llm_agent(
         typer.echo(f"senos agent: {error}", err=True)
         raise typer.Exit(code=1) from error
     if watch and result["status"] == "evaluated":
+        advisor = None
+        if adaptive:
+            from senos.agents.adaptive import AdaptiveCPUAdvisor
+            try:
+                advisor = AdaptiveCPUAdvisor(model=model, provider_name=provider_name)
+            except AgentError as error:
+                typer.echo(f"senos agent: {error}", err=True)
+                raise typer.Exit(code=1) from error
         if json_output:
             typer.echo(json.dumps({"event": "agent", "result": result}))
         else:
-            typer.echo(f"LLM objective resolved once ({result['agent']['model']}); remaining cycles use local code.")
+            typer.echo("Periodic LLM weight reviews enabled (at least 10 seconds apart)." if adaptive else f"LLM objective resolved once ({result['agent']['model']}); remaining cycles use local code.")
             typer.echo(f"Agent rationale: {result['rationale']}")
-        _watch_intent(result["evaluation"]["intent"], database, monitor_db, interval, max_cycles, json_output, initial=result["evaluation"], apply=apply)
+        _watch_intent(result["evaluation"]["intent"], database, monitor_db, interval, max_cycles, json_output, initial=result["evaluation"], apply=apply, advisor=advisor)
         return
     if json_output:
         typer.echo(json.dumps(result))

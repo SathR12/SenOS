@@ -144,3 +144,30 @@ Both flags and the selected provider's credentials (environment or local `.env`)
 ## Watch the objective
 
 Add `--watch --interval 5` to keep evaluating the interpreted objective until its original deadline. Use `--max-cycles 3` for a short test. The model runs once; later decisions use local telemetry and deterministic rules. Sessions and cycle history are saved separately from the registry. See [monitoring usage](monitoring.md) for inspection, cancellation, JSON Lines, and crash limitations.
+
+
+## Periodic LLM weight selection
+
+Use this opt-in mode in the isolated Linux environment, with workloads already registered:
+
+```bash
+make adapt TEXT="Prioritize web for one minute while keeping build progressing"
+```
+
+Or call the CLI directly:
+
+```bash
+uv run senos agent run "Prioritize web for one minute while keeping build progressing" --watch --adaptive --apply --interval 10 --max-cycles 6
+```
+
+Omit `--apply` to record recommendations without resource changes. Without `--adaptive`, the existing local deterministic monitoring path remains available.
+
+The first LLM interaction resolves your objective. Each adaptive review then sends fresh registered-workload CPU, memory, and PSI measurements, current weights, immutable objective, bounds, cooldown state, and the last two recommendation/execution outcomes to the configured provider. The LLM chooses an exact numeric weight, or `null` to hold. For example, it can recommend 150 from a baseline of 100, then reduce that boost to 125 after the cooldown. This replaces fixed heuristic doubling in this mode.
+
+The harness refreshes telemetry after the API response, rejects changed expected weights, and sends only a validated proposal to the restricted executor. It never executes generated commands. Weights stay between the captured original weight and the smaller of twice that original or 1000. The executor retains the 30-second change cooldown, identity checks, fresh evidence checks, memory-pressure guard for increases, independent expiration recovery, and restoration on exit. Preserved workloads are not rewritten. Missing readings can prevent execution.
+
+Reviews are at least 10 seconds apart, plus model and sampling time, with at most 12 review calls per run (initial objective resolution has its separate existing tool-call budget). Provider errors or malformed/out-of-bounds recommendations stop the loop and trigger restoration. Stop requests and the original deadline take precedence over late model responses. Ctrl+C restores settings. JSON cycle records include `advisor` (model, review number, numeric choice, rationale) and the actual executor result, allowing proposed changes to be distinguished from verified writes.
+
+This version uses resource telemetry and recorded action outcomes. Application FPS, request latency, and background batches per second are displayed by benchmarks but are not inputs to the advisor. Memory controls are not implemented. Measure application-level results separately; model-selected weights do not guarantee better performance.
+
+`make demo` and `make game-ai` now enable adaptive reviews automatically; the offline demo and `make game` retain deterministic control.

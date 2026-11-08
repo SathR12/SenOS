@@ -11,7 +11,7 @@ import time
 from uuid import uuid4
 
 from senos.agents.cpu import CPUAgent, CPUContext
-from senos.contracts import ActionResult, Intent, Workload
+from senos.contracts import ActionResult, Intent, Workload, Proposal
 from senos.executor.cpu import SystemdCPUBackend
 from senos.executor.locking import cpu_lock
 from senos.recovery.errors import RestoreError
@@ -101,11 +101,17 @@ class CPUApplication:
             return session_id
 
     def apply(self, session_id: str, evaluation: dict) -> ActionResult | None:
+        return self._apply(session_id, evaluation, adaptive=False)
+
+    def apply_adaptive(self, session_id: str, evaluation: dict) -> ActionResult | None:
+        return self._apply(session_id, evaluation, adaptive=True)
+
+    def _apply(self, session_id, evaluation, *, adaptive):
         context = CPUContext.model_validate(evaluation["context"])
-        decision = CPUAgent().evaluate(context, now=self.now())
-        if decision.proposal is None:
+        raw = evaluation["decision"].get("proposal") if adaptive else CPUAgent().evaluate(context, now=self.now()).proposal
+        if raw is None:
             return None
-        proposal = decision.proposal
+        proposal = Proposal.model_validate(raw)
         started = self.now()
         previous = None
         with cpu_lock(self.database):
@@ -125,12 +131,24 @@ class CPUApplication:
                 intent = Intent.model_validate_json(session["intent_json"])
                 if context.intent != intent or proposal.intent_id != intent.intent_id or proposal.workload_id != intent.target_workload_id:
                     return result("rejected", "Evaluation does not match the authorized objective")
-                if intent.submitted_at > started or started >= datetime.fromisoformat(session["deadline"]) or proposal.expires_at > datetime.fromisoformat(session["deadline"]):
+                if proposal.created_at > started or intent.submitted_at > started or started >= datetime.fromisoformat(session["deadline"]) or proposal.expires_at > datetime.fromisoformat(session["deadline"]):
                     return result("rejected", "Intent or proposal is expired or future-dated")
                 if session["last_change_at"] and (started - datetime.fromisoformat(session["last_change_at"])).total_seconds() < 30:
                     return result("rejected", "A real CPU change is within its persistent 30-second cooldown")
                 ceiling = min(1000, session["original_effective"] * 2)
-                if not proposal.expected_cpu_weight < proposal.proposed_cpu_weight <= ceiling:
+                if adaptive:
+                    samples = sorted((sample for sample in context.observations if sample.workload_id == proposal.workload_id), key=lambda sample: sample.observed_at)[-3:]
+                    if len(samples) < 3 or (samples[-1].observed_at - samples[0].observed_at).total_seconds() < 2 or any(not 0 <= (started - sample.observed_at).total_seconds() <= 10 or sample.state.value != "active" or sample.cpu_pressure_some_avg10 is None for sample in samples):
+                        return result("rejected", "Adaptive application requires three fresh active pressure samples spanning two seconds")
+                    if proposal.proposed_cpu_weight > proposal.expected_cpu_weight and any(not sample.cpu_usage_percent or sample.memory_pressure_some_avg10 is None or sample.memory_pressure_some_avg10 >= 10 for sample in samples):
+                        return result("rejected", "Increasing CPU weight requires active CPU use and available low memory pressure")
+                    for identifier in intent.preserve_workload_ids:
+                        preserved = [sample for sample in context.observations if sample.workload_id == identifier]
+                        if not preserved or any(sample.state.value != "active" or not 0 <= (started - sample.observed_at).total_seconds() <= 10 for sample in preserved):
+                            return result("rejected", "Preserved workload evidence is unavailable or stale")
+                    if not session["original_effective"] <= proposal.proposed_cpu_weight <= ceiling:
+                        return result("rejected", "Adaptive weight must remain between the original weight and its bounded 2x ceiling")
+                elif not proposal.expected_cpu_weight < proposal.proposed_cpu_weight <= ceiling:
                     return result("rejected", "Proposal exceeds the original-weight 2x ceiling; repeated boosts are not allowed")
                 workload = Registry(self.database).get_by_id(intent.target_workload_id)
                 if workload != Workload.model_validate_json(session["workload_json"]):

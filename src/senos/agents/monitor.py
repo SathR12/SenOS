@@ -20,7 +20,7 @@ def utc_now():
 def monitor_intent(
     intent: Intent, database: Path, log_database: Path, *, interval: float = 5,
     max_cycles: int | None = None, initial_evaluation: dict | None = None,
-    apply: bool = False, application=None,
+    apply: bool = False, application=None, advisor=None,
     on_event: Callable[[dict], None] | None = None, on_start: Callable[[str], None] | None = None,
     evaluate: Callable = evaluate_intent, pause: Callable = time.sleep,
     now: Callable = utc_now, clock: Callable = time.monotonic,
@@ -33,6 +33,12 @@ def monitor_intent(
         raise MonitorError("Cycle limit must be an integer from 1 through 10000")
     if database.resolve() == log_database.resolve() or (database.exists() and log_database.exists() and database.samefile(log_database)):
         raise MonitorError("Monitor database must be separate from the workload registry")
+    if advisor is not None:
+        if max_cycles is not None and max_cycles > 12:
+            raise MonitorError("Adaptive monitoring permits at most 12 LLM reviews")
+        max_cycles = max_cycles or 12
+        interval = max(10, interval)
+    baseline = None
     started = now()
     if intent.submitted_at > started:
         raise MonitorError("Cannot monitor a future-dated intent")
@@ -70,17 +76,36 @@ def monitor_intent(
             # Expiration and explicit stop take precedence over publishing a recommendation.
             if remaining() <= 0:
                 break
+            if advisor is not None:
+                session = application.store.get(execution_session) if apply else None
+                if baseline is None:
+                    from senos.agents.cpu import CPUContext
+                    context = CPUContext.model_validate(evaluation["context"])
+                    baseline = session["original_effective"] if session else context.current_cpu_weights.get(intent.target_workload_id)
+                    if baseline is None:
+                        raise MonitorError("Adaptive monitoring requires a known original CPU weight")
+                recommendation, expected = advisor.recommend(evaluation, baseline, session)
+                if remaining() <= 0 or store.get(run_id)["status"] != "running":
+                    break
+                evaluation = evaluate(intent, database)
+                if evaluation.get("executed") is not False or evaluation.get("mode") != "dry_run" or evaluation.get("intent") != intent.model_dump(mode="json"):
+                    raise MonitorError("Invalid refreshed adaptive evaluation")
+                if remaining() <= 0 or store.get(run_id)["status"] != "running":
+                    break
+                evaluation = advisor.attach(evaluation, recommendation, expected, now())
             if apply:
                 # A concurrent stop must win before the executor gets authorization.
                 if store.get(run_id)["status"] != "running":
                     break
-                action = application.apply(execution_session, evaluation)
+                action = (application.apply_adaptive if advisor is not None else application.apply)(execution_session, evaluation)
                 evaluation = {**evaluation, "mode": "apply", "executed": action is not None and action.status.value == "applied",
                     "execution": action.model_dump(mode="json") if action is not None else None}
                 applied_any = applied_any or evaluation["executed"]
                 if action is not None and action.status.value == "failed":
                     store.append(run_id, evaluation)
                     raise MonitorError(action.reason)
+            if advisor is not None:
+                advisor.record(evaluation)
             if not store.append(run_id, evaluation):
                 break
             cycles += 1
@@ -101,8 +126,9 @@ def monitor_intent(
         store.finish(run_id, "interrupted", "Stopped with Ctrl+C; restoration is required if CPU policies were applied")
     except Exception as error:
         store.finish(run_id, "failed", "Monitoring stopped after a collection or persistence error")
+        from senos.agents.provider import AgentError
         from senos.recovery.errors import RestoreError
-        if isinstance(error, (IntentError, MonitorError, RestoreError, RegistrationError, OSError, ValueError)):
+        if isinstance(error, (AgentError, IntentError, MonitorError, RestoreError, RegistrationError, OSError, ValueError)):
             raise MonitorError(f"Monitoring failed (run {run_id}): {error}") from error
         raise
     finally:

@@ -245,3 +245,11 @@ def test_background_rate_uses_elapsed_counter_time_not_total_batches():
     assert summary['Prioritized']['background_batches_per_second'] == 5
     assert summary['Prioritized']['background_batches'] == 300
     assert summary['Prioritized']['measurement_seconds'] == 60
+
+
+def test_adaptive_demo_explicitly_enables_bounded_periodic_reviews(tmp_path):
+    args = demo.controller_arguments("ai", tmp_path, adaptive=True)
+    assert "--adaptive" in args
+    assert args[args.index("--max-cycles") + 1] == "6"
+    assert args[args.index("--interval") + 1] == "10"
+    assert "--adaptive" not in demo.controller_arguments("deterministic", tmp_path, adaptive=True)

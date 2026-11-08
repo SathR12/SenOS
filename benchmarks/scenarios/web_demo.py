@@ -141,7 +141,7 @@ class DemoState:
                 latency_reduction_percent=reduction)
 
 
-def controller_arguments(mode, run, intent_text=None, *, game=False):
+def controller_arguments(mode, run, intent_text=None, *, game=False, adaptive=False):
     target = 'demo-game' if game else 'local-app'
     background = 'demo-build' if game else 'background-build'
     default_intent = (f'Prioritize {target} for one minute while keeping {background} progressing' if game else
@@ -149,6 +149,8 @@ def controller_arguments(mode, run, intent_text=None, *, game=False):
     cli = [sys.executable, '-c', 'from senos.cli import app; app()']
     if mode == 'ai':
         cli += ['agent', 'run', intent_text or default_intent, '--watch']
+        if adaptive:
+            cli += ['--adaptive', '--interval', '10', '--max-cycles', '6']
     else:
         cli += ['monitor', 'start', target, '--duration-seconds', '60', '--preserve', background]
     return cli + ['--apply', '--json', '--db', str(run/'registry.sqlite3'), '--monitor-db', str(run/'monitor.sqlite3')]
@@ -376,7 +378,7 @@ def experiment(state, run, cpu, mode, stop, done, game=False):
                     state.update(accepting_intent=False)
                     state.update(stage='Resolving intent' if mode == 'ai' else 'Evaluating', step=3, stage_deadline=None,
                         message='SenOS is understanding your request; deterministic safety checks authorize any CPU change.' if mode == 'ai' else 'SenOS is evaluating the fixed offline objective with deterministic safety checks.')
-                    controller = subprocess.Popen(controller_arguments(mode, run, state.intent_text, game=game), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
+                    controller = subprocess.Popen(controller_arguments(mode, run, state.intent_text, game=game, adaptive=getattr(state, "adaptive", False)), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
                     controller_started = now
                 if controller is not None and controller.poll() is None and now-controller_started > 180:
                     raise RuntimeError('Controller exceeded 180 seconds; interrupting it and checking recovery')
@@ -480,6 +482,7 @@ def experiment(state, run, cpu, mode, stop, done, game=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--adaptive', action='store_true', help='Use periodic LLM numeric weight selection in AI mode')
     parser.add_argument('--game', action='store_true', help='Autoplay Python game with measured frame deadlines')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--mode', choices=('ai', 'deterministic'), default='ai')
@@ -536,6 +539,7 @@ def main():
             temporary.write_text(json.dumps(dict(run=str(run), game=args.game, url=f'http://localhost:{server.server_port}'))+'\n')
             temporary.replace(STATE_ROOT/'latest.json')
             print('Other terminal commands: make demo-status, make proof, make results', flush=True)
+            state.adaptive = args.adaptive
             worker = threading.Thread(target=experiment, args=(state, run, cpu, args.mode, stop, done, args.game))
             worker.start()
             finished_at = None
