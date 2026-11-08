@@ -57,6 +57,16 @@ def test_direct_launch_resolves_artifacts_from_repository_not_cwd(monkeypatch, t
     assert demo.STATE_ROOT == demo.ROOT/'var'/'web-demo'
 
 
+def test_weights_preserves_unset_cpu_weight(monkeypatch):
+    class Result:
+        def __init__(self, value):
+            self.stdout = value
+
+    values = iter(('100\n', '[not set]\n'))
+    monkeypatch.setattr(demo, 'command', lambda *args, **kwargs: Result(next(values)))
+    assert demo.weights(('web.service', 'build.service')) == [100, None]
+
+
 def test_progress_read_retries_transient_file_replacement_gap(tmp_path, monkeypatch):
     path = tmp_path/'background.json'
     reads = iter([FileNotFoundError('rename gap'), '{"completed_batches": 42}'])

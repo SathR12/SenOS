@@ -157,7 +157,11 @@ def ready_state(path, unit):
 
 
 def weights(units):
-    return [int(command(['systemctl', '--user', 'show', unit, '-p', 'CPUWeight', '--value']).stdout.strip()) for unit in units]
+    values = []
+    for unit in units:
+        raw = command(['systemctl', '--user', 'show', unit, '-p', 'CPUWeight', '--value']).stdout.strip()
+        values.append(None if raw in {'', '[not set]'} else int(raw))
+    return values
 
 
 def recovery_verified(run):
@@ -217,6 +221,8 @@ def experiment(state, run, cpu, mode, stop, done):
                 if controller is not None and controller.poll() is None and now-controller_started > 180:
                     raise RuntimeError('Controller exceeded 180 seconds; interrupting it and checking recovery')
                 current = weights(units)
+                if any(weight is None for weight in current):
+                    raise RuntimeError('CPUWeight is unavailable for a live demo workload')
                 if controller is not None and controller.poll() is not None:
                     if restored_start is None:
                         # Recheck the durable execution records as well as actual live settings.
@@ -288,7 +294,8 @@ def experiment(state, run, cpu, mode, stop, done):
                 until = time.monotonic()+12
                 while not recovery_verified(run) and time.monotonic() < until:
                     time.sleep(1)
-                restored = weights(units) == [100, 100] and recovery_verified(run)
+                live_weights = weights(units)
+                restored = live_weights in ([100, 100], [None, None]) and recovery_verified(run)
                 state.update(restored=restored)
                 if not restored:
                     state.error('CPU restoration not verified before workload shutdown; inspect registry recovery records.')
