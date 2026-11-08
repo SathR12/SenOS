@@ -39,8 +39,9 @@ system-wide pressure. PSI percentages remain bounded from 0 to 100.
 `Intent` is a validated statement of what the user wants. The first milestone
 supports `prioritize` and `restore`. A prioritize intent identifies one target,
 the workloads that must continue making progress, and a bounded duration of 1 through 86,400 seconds (an initial SenOS policy choice). A
-restore intent has no duration. `source_text` preserves the original request for
-audit and explanation.
+restore intent has no duration. `source_text` preserves the original natural-
+language request or a canonical description of structured CLI input for audit
+and explanation.
 
 ## Proposal
 

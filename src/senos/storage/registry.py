@@ -95,6 +95,32 @@ class RegistryStore:
         except (OSError, sqlite3.Error) as error:
             raise RegistrationError("Cannot read registry database; check its path and permissions") from error
 
+    def get_by_name(self, name: str) -> RegisteredWorkload:
+        """Return one persistence record by its unique display name."""
+        return self._get_one("name", name)
+
+    def get_by_id(self, workload_id: str) -> RegisteredWorkload:
+        """Return one persistence record by its stable UUID string."""
+        return self._get_one("id", workload_id)
+
+    def _get_one(self, column: str, value: str) -> RegisteredWorkload:
+        if not self.path.exists():
+            raise RegistrationError(f"Workload {value!r} is not registered")
+        query = {
+            "name": "SELECT * FROM registered_workloads WHERE name = ?",
+            "id": "SELECT * FROM registered_workloads WHERE id = ?",
+        }[column]
+        try:
+            uri = self.path.resolve().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(uri, uri=True, timeout=5)) as connection:
+                connection.row_factory = sqlite3.Row
+                row = connection.execute(query, (value,)).fetchone()
+                if row is None:
+                    raise RegistrationError(f"Workload {value!r} is not registered")
+                return RegisteredWorkload(**dict(row))
+        except (OSError, sqlite3.Error) as error:
+            raise RegistrationError("Cannot read registry database; check its path and permissions") from error
+
 
     def remove(self, name: str | None = None) -> int:
         """Delete one named record, or all records when name is None.
