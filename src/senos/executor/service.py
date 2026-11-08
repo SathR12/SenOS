@@ -72,6 +72,7 @@ class ProposalExecutor:
             expires_at=proposal.expires_at,
         )
         try:
+            self.store.set_recovery_state(proposal.proposal_id, "applying")
             self.backend.write(workload, proposal.proposed_cpu_weight)
             verified = self.backend.read(workload)
             if (

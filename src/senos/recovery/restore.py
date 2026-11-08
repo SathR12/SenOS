@@ -109,8 +109,10 @@ class RestoreService:
                 results.append(RestoreOutcome(record.name, "failed", point["original_weight"], str(error)))
         return results
 
-    def reconcile(self, *, now=None, dry_run: bool = False) -> list[RestoreOutcome]:
-        """Recover durable proposal actions after a crash or expiration."""
+    def reconcile(
+        self, name: str | None = None, *, now=None, dry_run: bool = False, force: bool = False
+    ) -> list[RestoreOutcome]:
+        """Recover durable proposal actions after a crash, expiry, or request."""
         if not self.database.exists():
             return []
         now = now or datetime.now(timezone.utc)
@@ -119,8 +121,13 @@ class RestoreService:
         except PersistenceError as error:
             raise RestoreError(str(error)) from error
         records = {item.id: item for item in self._workloads()}
+        selected_ids = {
+            item.id for item in records.values() if name is None or item.name == name
+        }
         results = []
         for point in points:
+            if point["workload_id"] not in selected_ids:
+                continue
             record = records.get(point["workload_id"])
             if record is None:
                 self.policy_store.set_recovery_state(point["proposal_id"], "intervention_required")
@@ -139,11 +146,17 @@ class RestoreService:
                         self.policy_store.set_recovery_state(point["proposal_id"], "intervention_required")
                         results.append(RestoreOutcome(record.name, "failed", point["previous_configured_weight"], "Action did not reach a verified applied state"))
                         continue
-                    self.policy_store.set_recovery_state(point["proposal_id"], "pending_restore")
-                if point["state"] in {"applied", "pending_restore", "restore_failed"} and expires > now:
+                if (
+                    point["state"] in {"applied", "pending_restore", "restore_failed"}
+                    and not force and expires > now
+                ):
                     continue
                 if dry_run:
                     results.append(RestoreOutcome(record.name, "dry_run", point["previous_configured_weight"], "Would restore durable recovery state"))
+                    continue
+                if state.weight == point["previous_configured_weight"]:
+                    self.policy_store.set_recovery_state(point["proposal_id"], "restored")
+                    results.append(RestoreOutcome(record.name, "restored", point["previous_configured_weight"], "Previous CPUWeight was already effective"))
                     continue
                 self.policy_store.set_recovery_state(point["proposal_id"], "pending_restore")
                 self.backend.write(workload, point["previous_configured_weight"])

@@ -228,7 +228,7 @@ def restore(
         raise typer.BadParameter("Provide a workload name or --all, not both")
     try:
         service = RestoreService(db if db is not None else default_registry_path())
-        reconciliation = service.reconcile(dry_run=dry_run)
+        reconciliation = service.reconcile(name, dry_run=dry_run, force=name is not None or all_workloads)
         results = service.restore(name, dry_run=dry_run)
         results = reconciliation + results
     except RestoreError as error:
