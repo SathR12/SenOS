@@ -58,8 +58,8 @@ def test_status_json_preserves_registry_identity_and_unavailable_values(tmp_path
     assert payload["source"] == "registry"
     assert payload["live_telemetry"] is False
     row = payload["workloads"][0]
-    assert row["workload"]["workload_id"] == record.id
-    assert row["observation"]["workload_id"] == record.id
+    assert row["workload"]["workload_id"] == str(record.workload_id)
+    assert row["observation"]["workload_id"] == str(record.workload_id)
     assert row["observation"]["cpu_usage_percent"] is None
     assert row["observation"]["memory_usage_bytes"] is None
     assert row["observation"]["state"] == "unknown"

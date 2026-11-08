@@ -14,7 +14,7 @@ SenOS runs in Linux user space and uses existing operating-system controls. It d
 
 ## Project status
 
-This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, and removal through `unregister`. `status` reads live CPU, memory, and pressure for registered Linux units and offers explicitly labeled demo readings with `--demo`; `restore` recovers recorded CPU weights; see [restore usage](docs/restore.md). The shared contracts and registry adapter are implemented; see [contract semantics](docs/contracts.md). Live read-only systemd/cgroup v2 telemetry is implemented. A [dry-run CPU proposal agent](docs/agents.md) is implemented. Automatic policy application is not implemented. Restore includes a restricted CPU-weight backend and persistent original-settings journal.
+This repository currently contains project documentation, a Python package skeleton, and folders for tests, benchmarks, deployment, and development scripts. Dependencies are managed with uv, and the `senos` CLI supports `version`, persistent `register`, removal through `unregister`, and deterministic `intent prioritize`. `status` reads live CPU, memory, and pressure for registered Linux units and offers explicitly labeled demo readings with `--demo`; `restore` recovers recorded CPU weights; see [restore usage](docs/restore.md). The shared contracts and registry adapter are implemented; see [contract semantics](docs/contracts.md). Intent submission validates an objective but does not execute or persist a policy. Live read-only systemd/cgroup v2 telemetry is implemented. A [dry-run CPU proposal agent](docs/agents.md) is implemented. Automatic policy application is not implemented. Restore includes a restricted CPU-weight backend and persistent original-settings journal.
 
 **We are building the CLI first.** A UI can follow once the controller, safety checks, and experiments work. Both interfaces should use the same application services and validated data contracts.
 
@@ -133,7 +133,7 @@ SenOS/
 |       |-- cli.py                 # CLI entry point
 |       |-- config.py              # Validated application configuration
 |       |-- contracts/             # Intent, Workload, Observation, Proposal, ActionResult
-|       |-- intent/                # Natural-language parsing and provider adapters
+|       |-- intent/                # Deterministic validation and provider adapters
 |       |-- agents/                # Orchestrator, CPU, memory, process, reliability
 |       |-- telemetry/             # proc, cgroup, PSI, and application measurements
 |       |-- workloads/             # Registration, identity, and lifecycle tracking
@@ -155,8 +155,12 @@ SenOS/
 |-- scripts/                       # Environment preflight and development helpers
 `-- docs/
     |-- architecture.md            # Component boundaries and design decisions
+    |-- contracts.md               # Shared cross-component data semantics
     |-- development.md             # Reproducible Linux setup
+    |-- intent.md                  # Deterministic intent command
+    |-- registration.md            # Workload registry behavior and examples
     |-- safety.md                  # Permissions, allowed actions, and recovery
+    |-- status.md                  # Registry status and demo readings
     `-- experiments.md             # Benchmark protocol and results
 ```
 
@@ -191,7 +195,7 @@ Agree on shared contracts and their example payloads before implementing modules
 5. Implement observe-only telemetry before enabling writes.
 6. Add one bounded CPU-weight operation, then verify restoration, rejected actions, and crash recovery.
 
-To set up a development environment, install [uv](https://docs.astral.sh/uv/) and run `uv sync`. Run the tests with `uv run pytest` and the CLI with `uv run senos --help`. `senos version`, `senos register NAME --unit UNIT`, `senos unregister NAME`, and `senos unregister --all` work. See [workload registration](docs/registration.md) for a WSL/Linux example, persistence, validation, and integration testing. `senos status` reads live metrics on supported Linux hosts and otherwise lists registrations with unavailable metrics; `senos status --demo` shows labeled synthetic samples. See [status usage](docs/status.md). `senos restore [NAME]` or `senos restore --all` restores recorded CPU settings. Without recorded changes it reports a successful no-op; see [restore usage](docs/restore.md).
+To set up a development environment, install [uv](https://docs.astral.sh/uv/) and run `uv sync`. Run the tests with `uv run pytest` and the CLI with `uv run senos --help`. `senos version`, `senos register NAME --unit UNIT`, `senos unregister NAME`, and `senos unregister --all` work. See [workload registration](docs/registration.md) for a WSL/Linux example, persistence, validation, and integration testing. `senos status` reads live metrics on supported Linux hosts and otherwise lists registrations with unavailable metrics; `senos status --demo` shows labeled synthetic samples. See [status usage](docs/status.md). `senos intent prioritize NAME --duration-seconds N` resolves registered workloads and returns a validated but unexecuted objective; see [intent usage](docs/intent.md). `senos restore [NAME]` or `senos restore --all` restores recorded CPU settings. Without recorded changes it reports a successful no-op; see [restore usage](docs/restore.md).
 
 ## CPU agent demo
 

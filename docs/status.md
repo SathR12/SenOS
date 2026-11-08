@@ -53,6 +53,7 @@ Keep source metadata when consuming/exporting demo values so synthetic readings 
 - `src/senos/telemetry/linux.py`: read-only systemd and cgroup v2 telemetry.
 - `src/senos/telemetry/fake.py`: isolated synthetic provider.
 - `src/senos/contracts/`: shared validation and schema definitions.
+- `src/senos/workloads/registry.py`: application-level shared-contract access.
 - `src/senos/storage/registry.py`: persistent records and read-only listing.
 
 The status tests cover registry data, empty/missing databases, invalid data, JSON identities, explicit demo labeling, no default demo fallback, and registration removal. `tests/unit/test_telemetry.py` covers live readings against fake cgroup files, including multicore CPU, non-active states, invalid cgroup paths, missing files, and counter resets. The opt-in WSL/Linux systemd tests exercise registration, status, and unregistration across separate CLI processes, and measure a real busy-loop unit. System-wide pressure and automatic policy application remain future work. Recorded CPU restoration is available separately through [restore](restore.md).

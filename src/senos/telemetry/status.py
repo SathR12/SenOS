@@ -8,8 +8,8 @@ from typing import Literal
 from pydantic import ValidationError
 
 from senos.contracts import Observation, Workload, WorkloadState
-from senos.storage.registry import RegistryStore
 from senos.workloads.errors import RegistrationError
+from senos.workloads.registry import Registry
 from . import fake
 from .linux import LinuxTelemetry
 
@@ -40,7 +40,7 @@ def get_status(database: Path, *, demo: bool = False) -> StatusSnapshot:
     if demo:
         return StatusSnapshot("demo", tuple(StatusRow(workload, fake.observe(workload)) for workload in fake.list_workloads()))
     try:
-        workloads = [record.to_workload() for record in RegistryStore(database).list_workloads()]
+        workloads = Registry(database).list_workloads()
     except (RegistrationError, ValidationError) as error:
         raise StatusError("Cannot read workload registry; check its path, permissions, and saved data") from error
     telemetry = default_telemetry()

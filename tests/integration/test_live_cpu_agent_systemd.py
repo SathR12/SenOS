@@ -29,16 +29,16 @@ def test_live_cpu_command_is_read_only_and_uses_real_workloads(tmp_path):
             records.append(record)
         before_database = database.read_bytes()
         backend = SystemdCPUBackend()
-        before = [backend.read(record.to_workload()) for record in records]
+        before = [backend.read(record) for record in records]
         command = [sys.executable, "-c", "from senos.cli import app; app()", "agent", "cpu", "--target", "target", "--preserve", "background", "--db", str(database), "--json"]
         result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=40)
         payload = json.loads(result.stdout)
         assert payload["mode"] == "dry_run" and payload["source"] == "live"
         assert payload["decision"]["status"] == "no_action"
-        assert payload["context"]["intent"]["target_workload_id"] == records[0].id
-        assert payload["context"]["current_cpu_weights"][records[0].id] == 100
+        assert payload["context"]["intent"]["target_workload_id"] == str(records[0].workload_id)
+        assert payload["context"]["current_cpu_weights"][str(records[0].workload_id)] == 100
         assert len(payload["context"]["observations"]) == 6
-        assert [backend.read(record.to_workload()) for record in records] == before
+        assert [backend.read(record) for record in records] == before
         assert database.read_bytes() == before_database
     finally:
         for unit in units:

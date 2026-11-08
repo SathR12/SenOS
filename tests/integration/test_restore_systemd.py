@@ -29,8 +29,7 @@ def test_real_restore_and_dry_run_preserve_registration(tmp_path, original):
         command += ["/usr/bin/sleep", "120"]
         subprocess.run(command, check=True, capture_output=True, text=True, timeout=10)
         registry = Registry(database)
-        record, _ = registry.register("test", unit)
-        workload = record.to_workload()
+        workload, _ = registry.register("test", unit)
         backend = SystemdCPUBackend()
         assert backend.read(workload).weight == original
         # This is the integration hook a future executor must invoke before its write.
@@ -44,7 +43,7 @@ def test_real_restore_and_dry_run_preserve_registration(tmp_path, original):
         restored = subprocess.run(cli, check=True, capture_output=True, text=True, timeout=20)
         assert json.loads(restored.stdout)["results"][0]["status"] == "restored"
         assert backend.read(workload).weight == original
-        assert Registry(database).list_workloads()[0].id == record.id
+        assert Registry(database).list_workloads()[0].workload_id == workload.workload_id
         repeated = subprocess.run(cli, check=True, capture_output=True, text=True, timeout=20)
         assert json.loads(repeated.stdout)["results"] == []
     finally:
