@@ -197,7 +197,7 @@ Agree on shared contracts and their example payloads before implementing modules
 
 To set up a development environment, install [uv](https://docs.astral.sh/uv/) and run `uv sync`. Run the tests with `uv run pytest` and the CLI with `uv run senos --help`. `senos version`, `senos register NAME --unit UNIT`, `senos unregister NAME`, and `senos unregister --all` work. See [workload registration](docs/registration.md) for a WSL/Linux example, persistence, validation, and integration testing. `senos status` reads live metrics on supported Linux hosts and otherwise lists registrations with unavailable metrics; `senos status --demo` shows labeled synthetic samples. See [status usage](docs/status.md). `senos restore [NAME]` or `senos restore --all` restores recorded CPU settings. Without recorded changes it reports a successful no-op; see [restore usage](docs/restore.md).
 
-Use `senos intent prioritize NAME --duration-seconds N` to validate an objective without persisting or executing it; see [intent usage](docs/intent.md).
+Use `senos intent prioritize NAME --duration-seconds N` to validate an objective, or add `--evaluate` to collect live telemetry and return a dry-run CPU decision without applying it; see [intent usage](docs/intent.md).
 
 ## CPU agent demo
 

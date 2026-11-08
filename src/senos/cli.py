@@ -89,6 +89,7 @@ def show_version() -> None:
 
 @intent_app.command("prioritize")
 def prioritize_intent(
+    evaluate: bool = typer.Option(False, "--evaluate", help="Collect live telemetry and evaluate a CPU proposal without applying it."),
     target: str = typer.Argument(..., help="Registered workload name to prioritize."),
     duration_seconds: int = typer.Option(..., "--duration-seconds", help="Intent duration from 1 through 86400 seconds."),
     preserve: list[str] | None = typer.Option(None, "--preserve", help="Registered workload that must keep progressing; repeat as needed."),
@@ -96,16 +97,24 @@ def prioritize_intent(
     json_output: bool = typer.Option(False, "--json", help="Print the validated intent as JSON."),
 ) -> None:
     """Validate a temporary priority objective; no resource policy is applied."""
+    database = db if db is not None else default_registry_path()
+    evaluation = None
     try:
         intent = IntentService(
-            Registry(db if db is not None else default_registry_path())
+            Registry(database)
         ).prioritize(target, duration_seconds, tuple(preserve or ()))
+        if evaluate:
+            from senos.intent.pipeline import evaluate_intent
+
+            if not json_output:
+                typer.echo("Reading live inputs for the validated intent...", err=True)
+            evaluation = evaluate_intent(intent, database)
     except IntentError as error:
         typer.echo(f"senos intent: {error}", err=True)
         raise typer.Exit(code=1) from error
 
     if json_output:
-        typer.echo(json.dumps({
+        typer.echo(json.dumps(evaluation if evaluation is not None else {
             "accepted": True,
             "executed": False,
             "intent": intent.model_dump(mode="json"),
@@ -117,6 +126,14 @@ def prioritize_intent(
     )
     if preserve:
         typer.echo(f"Preserve: {', '.join(name.strip() for name in preserve)}")
+    if evaluation is not None:
+        decision = evaluation["decision"]
+        for warning in evaluation["warnings"]:
+            typer.echo(f"Note: {warning}")
+        typer.echo(f"DRY RUN (live): {decision['status']}: {decision['reason']}")
+        if decision["proposal"] is not None:
+            proposal = decision["proposal"]
+            typer.echo(f"Would set CPUWeight {proposal['expected_cpu_weight']} -> {proposal['proposed_cpu_weight']}; expires {proposal['expires_at']}")
     typer.echo("No resource policy was applied.")
 
 

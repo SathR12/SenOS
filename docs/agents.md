@@ -78,3 +78,7 @@ A future controller must fetch real observations and current weights, verify reg
 - `tests/unit/test_cpu_agent.py`: decision and CLI behavior, including no OS/executor access.
 
 Run `uv run pytest`. The existing opt-in systemd tests exercise registration and restore, not agent effectiveness. Effectiveness must be evaluated later against Linux defaults and a static policy with real latency and background-progress measurements.
+
+## Intent-driven dry run
+
+Use `senos intent prioritize NAME --duration-seconds 600 --preserve OTHER --evaluate` to resolve a structured objective and evaluate it against live telemetry in one command. The original Intent is preserved through the optional CPU Proposal. See [intent usage](intent.md) for JSON output and limitations. This path does not apply CPU settings or call an LLM.
