@@ -6,6 +6,8 @@ from pathlib import Path
 from .cpu import CPUAgent, CPUContext
 from .demo import cpu_context
 from .live import collect_live_context
+from senos.contracts import ExecutionSnapshot
+from senos.storage.persistence import PolicyStore
 
 
 def run_cpu(*, input_path: Path | None = None, target_name: str | None = None, database: Path | None = None, preserve_names: tuple[str, ...] = (), duration_seconds: int = 600) -> dict:
@@ -25,8 +27,35 @@ def run_cpu(*, input_path: Path | None = None, target_name: str | None = None, d
         source = "demo"
     # Decide after collection, so newly collected timestamps are not in the future.
     now = datetime.now(timezone.utc)
+    store = PolicyStore(database) if source == "live" else None
+    if store is not None:
+        store.save_intent(context.intent)
+        context = context.model_copy(update={"intent": store.get_intent(context.intent.intent_id)})
+        observed_ids = {observation.workload_id for observation in context.observations}
+        store.save_snapshot(ExecutionSnapshot(
+            intent_id=context.intent.intent_id,
+            observations=context.observations,
+            cpu_weights={identifier: context.current_cpu_weights[identifier] for identifier in observed_ids},
+            invocation_ids={
+                identifier: next(sample.invocation_id for sample in context.observations
+                                 if sample.workload_id == identifier)
+                for identifier in observed_ids
+            },
+            cgroup_identities={
+                identifier: next(sample.cgroup_identity for sample in context.observations
+                                 if sample.workload_id == identifier)
+                for identifier in observed_ids
+            },
+        ))
+    agent = CPUAgent()
+    decision = agent.evaluate(context, now=now)
+    if store is not None:
+        if decision.proposal is not None:
+            store.save_proposal(decision.proposal)
+        else:
+            store.save_no_action(context.intent, decision.reason, now=now)
     return {
         "mode": "dry_run", "source": source,
         "context": context.model_dump(mode="json"), "warnings": list(warnings),
-        "decision": CPUAgent().evaluate(context, now=now).model_dump(mode="json"),
+        "decision": decision.model_dump(mode="json"),
     }

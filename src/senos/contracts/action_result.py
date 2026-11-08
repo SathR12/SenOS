@@ -37,10 +37,8 @@ class ActionResult(ContractModel):
             raise ValueError("finished_at cannot be earlier than started_at")
 
         if self.status is ActionStatus.APPLIED:
-            if self.previous_cpu_weight is None or self.effective_cpu_weight is None:
-                raise ValueError(
-                    "an applied result requires previous_cpu_weight and effective_cpu_weight"
-                )
+            if self.effective_cpu_weight is None:
+                raise ValueError("an applied result requires effective_cpu_weight")
             if self.effective_cpu_weight != self.requested_cpu_weight:
                 raise ValueError(
                     "effective_cpu_weight must equal requested_cpu_weight when applied"

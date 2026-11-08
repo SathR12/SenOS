@@ -15,6 +15,7 @@ from senos.config import default_registry_path
 from senos.intent import IntentError, IntentService
 from senos.telemetry.status import StatusError, get_status
 from senos.recovery.restore import RestoreError, RestoreService
+from senos.storage.persistence import PersistenceError, PolicyStore
 from senos.workloads.registry import Registry, RegistrationError
 
 app = typer.Typer(
@@ -100,7 +101,8 @@ def prioritize_intent(
         intent = IntentService(
             Registry(db if db is not None else default_registry_path())
         ).prioritize(target, duration_seconds, tuple(preserve or ()))
-    except IntentError as error:
+        PolicyStore(db if db is not None else default_registry_path()).save_intent(intent)
+    except (IntentError, PersistenceError) as error:
         typer.echo(f"senos intent: {error}", err=True)
         raise typer.Exit(code=1) from error
 
